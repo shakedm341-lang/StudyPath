@@ -1,5 +1,6 @@
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
+import { APP_VERSION } from '../version';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
@@ -36,6 +37,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
         <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
           <p>&copy; 2024 StudyPath</p>
+          <p className="mt-1">גרסה {APP_VERSION}</p>
         </div>
       </aside>
 

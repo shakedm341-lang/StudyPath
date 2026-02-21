@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
+        __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
       },

@@ -18,3 +18,9 @@ View your app in AI Studio: https://ai.studio/apps/7c873aa6-9ba0-42da-888a-3010d
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Versioning
+
+- The app version is stored in `package.json` (`version`).
+- The UI shows the current version in the sidebar footer.
+- `metadata.json` is automatically synced to match `package.json` via `scripts/sync-metadata-version.mjs` (runs on `npm run dev` and `npm run build`).
