@@ -583,7 +583,7 @@ export const GoalDetails: React.FC = () => {
         onConfirm: async () => {
             // Optimistic
             setChecklistItems(prev => prev.filter(c => c.id !== item.id));
-
+            // Update Goal stats
             const updatedGoal = {
                 ...goal,
                 totalExercises: Math.max(0, goal.totalExercises - 1),
