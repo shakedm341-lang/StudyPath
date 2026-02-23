@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { GoalDetails } from './pages/GoalDetails';
 import { ReviewSession } from './pages/ReviewSession';
+import { WeeklyPlan } from './pages/WeeklyPlan';
 import { Auth } from './pages/Auth';
 
 const App: React.FC = () => {
@@ -41,6 +42,7 @@ const App: React.FC = () => {
           <Route path="/" element={<Dashboard />} />
           <Route path="/goal/:id" element={<GoalDetails />} />
           <Route path="/review" element={<ReviewSession />} />
+          <Route path="/plan" element={<WeeklyPlan />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>

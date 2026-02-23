@@ -15,6 +15,14 @@ export const GoalDetails: React.FC = () => {
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Bulk Selection State
+  const [isTopicSelectionMode, setIsTopicSelectionMode] = useState(false);
+  const [selectedTopicIds, setSelectedTopicIds] = useState<Record<string, boolean>>({});
+  const [exerciseSelectionModeByTopic, setExerciseSelectionModeByTopic] = useState<Record<string, boolean>>({});
+  const [selectedExerciseIdsByTopic, setSelectedExerciseIdsByTopic] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
+
   // Modals State
   const [showTopicModal, setShowTopicModal] = useState(false);
   const [activeTopicIdForExercise, setActiveTopicIdForExercise] = useState<string | null>(null);
@@ -44,7 +52,16 @@ export const GoalDetails: React.FC = () => {
   const [expandedTopics, setExpandedTopics] = useState<{[key: string]: boolean}>({});
 
   // Confirm Modal State
-  const [confirmModal, setConfirmModal] = useState({
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    isDestructive: boolean;
+  }>({
     isOpen: false,
     title: '',
     message: '',
@@ -55,6 +72,11 @@ export const GoalDetails: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [id]);
+
+  const getSelectedIds = (map: Record<string, boolean>) =>
+    Object.keys(map).filter(k => map[k]);
+
+  const selectedTopicIdList = getSelectedIds(selectedTopicIds);
 
   const loadData = async () => {
     if (id) {
@@ -82,6 +104,46 @@ export const GoalDetails: React.FC = () => {
 
   const toggleTopic = (topicId: string) => {
     setExpandedTopics(prev => ({ ...prev, [topicId]: !prev[topicId] }));
+  };
+
+  const exitTopicSelectionMode = () => {
+    setIsTopicSelectionMode(false);
+    setSelectedTopicIds({});
+  };
+
+  const setExerciseSelectionMode = (topicId: string, enabled: boolean) => {
+    setExerciseSelectionModeByTopic(prev => ({ ...prev, [topicId]: enabled }));
+    if (!enabled) {
+      setSelectedExerciseIdsByTopic(prev => {
+        if (!prev[topicId]) return prev;
+        const next = { ...prev };
+        delete next[topicId];
+        return next;
+      });
+    } else {
+      setSelectedExerciseIdsByTopic(prev => (prev[topicId] ? prev : { ...prev, [topicId]: {} }));
+    }
+  };
+
+  const toggleExerciseSelected = (topicId: string, exerciseId: string) => {
+    setSelectedExerciseIdsByTopic(prev => ({
+      ...prev,
+      [topicId]: {
+        ...(prev[topicId] || {}),
+        [exerciseId]: !(prev[topicId] || {})[exerciseId]
+      }
+    }));
+  };
+
+  const clearSelectedExercises = (topicId: string, idsToClear: string[]) => {
+    if (!idsToClear || idsToClear.length === 0) return;
+    setSelectedExerciseIdsByTopic(prev => {
+      const topicMap = prev[topicId];
+      if (!topicMap) return prev;
+      const nextTopicMap = { ...topicMap };
+      idsToClear.forEach(x => delete nextTopicMap[x]);
+      return { ...prev, [topicId]: nextTopicMap };
+    });
   };
 
   const handleAddTopic = async () => {
@@ -151,6 +213,18 @@ export const GoalDetails: React.FC = () => {
             setTopics(prev => prev.filter(t => t.id !== topicId));
             setExercises(prev => prev.filter(e => e.topicId !== topicId));
             setChecklistItems(prev => prev.filter(c => c.topicId !== topicId));
+            setExerciseSelectionModeByTopic(prev => {
+              if (!prev[topicId]) return prev;
+              const next = { ...prev };
+              delete next[topicId];
+              return next;
+            });
+            setSelectedExerciseIdsByTopic(prev => {
+              if (!prev[topicId]) return prev;
+              const next = { ...prev };
+              delete next[topicId];
+              return next;
+            });
 
             const updatedGoal = {
                 ...goal,
@@ -167,6 +241,150 @@ export const GoalDetails: React.FC = () => {
             setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
       });
+  };
+
+  const handleBulkDeleteTopics = () => {
+    if (!goal) return;
+    const ids = selectedTopicIdList;
+    if (ids.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'מחיקת נושאים',
+      message: `האם אתה בטוח שברצונך למחוק ${ids.length} נושאים? כל התרגילים והמשימות שבהם יימחקו.`,
+      isDestructive: true,
+      confirmText: 'מחק',
+      onConfirm: async () => {
+        try {
+          const topicIdSet = new Set(ids);
+          const topicExs = exercises.filter(e => topicIdSet.has(e.topicId));
+          const topicChecks = checklistItems.filter(c => topicIdSet.has(c.topicId));
+
+          const totalToRemove = topicExs.length + topicChecks.length;
+          const completedExToRemove = topicExs.filter(e => e.status !== 'new').length;
+          const completedCheckToRemove = topicChecks.filter(c => c.isCompleted).length;
+
+          // Optimistic UI updates
+          setTopics(prev => prev.filter(t => !topicIdSet.has(t.id)));
+          setExercises(prev => prev.filter(e => !topicIdSet.has(e.topicId)));
+          setChecklistItems(prev => prev.filter(c => !topicIdSet.has(c.topicId)));
+          setExerciseSelectionModeByTopic(prev => {
+            const next = { ...prev };
+            ids.forEach(tid => delete next[tid]);
+            return next;
+          });
+          setSelectedExerciseIdsByTopic(prev => {
+            const next = { ...prev };
+            ids.forEach(tid => delete next[tid]);
+            return next;
+          });
+
+          const updatedGoal = {
+            ...goal,
+            totalTopics: Math.max(0, goal.totalTopics - ids.length),
+            totalExercises: Math.max(0, goal.totalExercises - totalToRemove),
+            completedExercises: Math.max(
+              0,
+              goal.completedExercises - (completedExToRemove + completedCheckToRemove)
+            )
+          };
+          setGoal(updatedGoal);
+
+          // Server calls
+          const { error } = await storageService.deleteTopics(ids);
+          if (error) {
+            console.error('Bulk topic delete failed:', error);
+            await loadData();
+          } else {
+            await storageService.updateGoal(updatedGoal);
+          }
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+          exitTopicSelectionMode();
+        }
+      }
+    });
+  };
+
+  const handleBulkDeleteExercises = (topicId: string) => {
+    if (!goal) return;
+    const ids = getSelectedIds(selectedExerciseIdsByTopic[topicId] || {});
+    if (ids.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'מחיקת תרגילים',
+      message: `האם אתה בטוח שברצונך למחוק ${ids.length} תרגילים?`,
+      isDestructive: true,
+      confirmText: 'מחק',
+      onConfirm: async () => {
+        try {
+          const toDelete = exercises.filter(e => e.topicId === topicId && ids.includes(e.id));
+          const completedToRemove = toDelete.filter(e => e.status !== 'new').length;
+
+          // Optimistic
+          setExercises(prev => prev.filter(e => !ids.includes(e.id)));
+
+          const updatedGoal = {
+            ...goal,
+            totalExercises: Math.max(0, goal.totalExercises - ids.length),
+            completedExercises: Math.max(0, goal.completedExercises - completedToRemove)
+          };
+          setGoal(updatedGoal);
+
+          const { error } = await storageService.deleteExercises(ids);
+          if (error) {
+            console.error('Bulk exercise delete failed:', error);
+            await loadData();
+          } else {
+            storageService.updateGoal(updatedGoal);
+          }
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+          clearSelectedExercises(topicId, ids);
+        }
+      }
+    });
+  };
+
+  const handleDeleteExerciseGroup = (topicId: string, groupName: string, groupExs: Exercise[]) => {
+    if (!goal) return;
+    const ids = groupExs.map(e => e.id).filter(Boolean);
+    if (ids.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'מחיקת קבוצה',
+      message: `האם אתה בטוח שברצונך למחוק את כל התרגילים בקבוצה "${groupName}"?`,
+      isDestructive: true,
+      confirmText: 'מחק קבוצה',
+      onConfirm: async () => {
+        try {
+          const completedToRemove = groupExs.filter(e => e.status !== 'new').length;
+
+          // Optimistic
+          setExercises(prev => prev.filter(e => !ids.includes(e.id)));
+
+          const updatedGoal = {
+            ...goal,
+            totalExercises: Math.max(0, goal.totalExercises - ids.length),
+            completedExercises: Math.max(0, goal.completedExercises - completedToRemove)
+          };
+          setGoal(updatedGoal);
+
+          const { error } = await storageService.deleteExercises(ids);
+          if (error) {
+            console.error('Group delete failed:', error);
+            await loadData();
+          } else {
+            storageService.updateGoal(updatedGoal);
+          }
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+          clearSelectedExercises(topicId, ids);
+        }
+      }
+    });
   };
 
   const handleAddExercise = async () => {
@@ -260,6 +478,7 @@ export const GoalDetails: React.FC = () => {
 
             // 4. Update UI (Only after successful delete)
             setExercises(prev => prev.filter(e => e.id !== ex.id));
+            clearSelectedExercises(ex.topicId, [ex.id]);
 
             // 5. Update Goal Stats
             const wasCompleted = ex.status !== 'new';
@@ -435,11 +654,35 @@ export const GoalDetails: React.FC = () => {
   };
 
   // Inline render function to prevent scope issues
-  const ExerciseRow = ({ ex, displayName }: { ex: Exercise, displayName?: string }) => {
+  const ExerciseRow = ({
+    ex,
+    displayName,
+    isSelectionMode,
+    isSelected,
+    onToggleSelected
+  }: {
+    ex: Exercise;
+    displayName?: string;
+    isSelectionMode?: boolean;
+    isSelected?: boolean;
+    onToggleSelected?: () => void;
+  }) => {
       const isOverdue = ex.dueDate && ex.dueDate < Date.now() && ex.status === 'new';
       return (
       <div className={`flex items-center justify-between p-3 bg-slate-50 rounded-lg border transition-colors hover:bg-slate-100 group relative ${isOverdue ? 'border-red-200 bg-red-50/30' : 'border-slate-100'}`}>
         <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isSelectionMode && (
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                checked={!!isSelected}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onToggleSelected?.();
+                }}
+                aria-label={`בחר תרגיל ${displayName || ex.location}`}
+              />
+            )}
             <span className={`flex-shrink-0 w-3 h-3 rounded-full ${
                 ex.status === 'green' ? 'bg-green-500' :
                 ex.status === 'red' ? 'bg-red-500' :
@@ -523,7 +766,32 @@ export const GoalDetails: React.FC = () => {
             <p className="text-slate-500">{goal.description}</p>
             </div>
         </div>
-        <Button onClick={() => setShowTopicModal(true)}>+ הוסף נושא</Button>
+        <div className="flex items-center gap-2">
+          {!isTopicSelectionMode ? (
+            <>
+              <Button variant="secondary" onClick={() => setIsTopicSelectionMode(true)}>
+                ניהול
+              </Button>
+              <Button onClick={() => setShowTopicModal(true)}>+ הוסף נושא</Button>
+            </>
+          ) : (
+            <>
+              <div className="text-sm text-slate-600">
+                נבחרו: <span className="font-semibold">{selectedTopicIdList.length}</span>
+              </div>
+              <Button
+                variant="danger"
+                disabled={selectedTopicIdList.length === 0}
+                onClick={handleBulkDeleteTopics}
+              >
+                מחק נבחרים
+              </Button>
+              <Button variant="ghost" onClick={exitTopicSelectionMode}>
+                ביטול
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6">
@@ -537,6 +805,9 @@ export const GoalDetails: React.FC = () => {
           const readiness = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
           const { groups, ungrouped } = getGroupedExercises(topic.id);
           const isExpanded = expandedTopics[topic.id] || false;
+          const isExerciseSelectionMode = !!exerciseSelectionModeByTopic[topic.id];
+          const selectedExerciseIds = selectedExerciseIdsByTopic[topic.id] || {};
+          const selectedExerciseIdList = getSelectedIds(selectedExerciseIds);
           
           const isTopicOverdue = topic.dueDate && topic.dueDate < Date.now() && readiness < 100;
 
@@ -553,6 +824,19 @@ export const GoalDetails: React.FC = () => {
                   <div className="flex-1">
                       <div className="flex justify-between items-start">
                         <div className="flex items-center gap-2">
+                             {isTopicSelectionMode && (
+                               <input
+                                 type="checkbox"
+                                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                 checked={!!selectedTopicIds[topic.id]}
+                                 onChange={(e) => {
+                                   e.stopPropagation();
+                                   setSelectedTopicIds(prev => ({ ...prev, [topic.id]: !prev[topic.id] }));
+                                 }}
+                                 onClick={(e) => e.stopPropagation()}
+                                 aria-label={`בחר נושא ${topic.title}`}
+                               />
+                             )}
                              <svg 
                                 className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} 
                                 fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -673,7 +957,35 @@ export const GoalDetails: React.FC = () => {
 
                        {/* Exercises Section */}
                        <div className="mt-2 pt-2 border-t border-slate-100">
-                          <h4 className="text-sm font-semibold text-slate-700 mb-3 mt-2">תרגילים (חזרה מרווחת)</h4>
+                          <div className="flex items-center justify-between gap-2 mb-3 mt-2">
+                            <h4 className="text-sm font-semibold text-slate-700">תרגילים (חזרה מרווחת)</h4>
+                            {!isExerciseSelectionMode ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setExerciseSelectionMode(topic.id, true)}
+                              >
+                                בחר תרגילים
+                              </Button>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <div className="text-xs text-slate-600">
+                                  נבחרו: <span className="font-semibold">{selectedExerciseIdList.length}</span>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  disabled={selectedExerciseIdList.length === 0}
+                                  onClick={() => handleBulkDeleteExercises(topic.id)}
+                                >
+                                  מחק נבחרים
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setExerciseSelectionMode(topic.id, false)}>
+                                  ביטול
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                           <div className="space-y-3">
                             {ungrouped.length === 0 && Object.keys(groups).length === 0 && (
                                 <p className="text-sm text-slate-400 italic">אין תרגילים בנושא זה.</p>
@@ -698,15 +1010,40 @@ export const GoalDetails: React.FC = () => {
                                                 </svg>
                                                 <h5 className="font-semibold text-slate-800 text-sm">{groupName}</h5>
                                             </div>
-                                            <div className="text-xs text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
-                                                {completed} / {total} הושלמו
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-xs text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
+                                                    {completed} / {total} הושלמו
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleDeleteExerciseGroup(topic.id, groupName, groupExs);
+                                                  }}
+                                                  title="מחק קבוצה"
+                                                  className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
+                                                >
+                                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                  </svg>
+                                                </button>
                                             </div>
                                         </div>
                                         {!isCollapsed && (
                                             <div className="p-2 space-y-2 border-t border-slate-100">
                                                 {groupExs.map(ex => {
                                                     const displayName = ex.location.split('::')[1];
-                                                    return <ExerciseRow key={ex.id} ex={ex} displayName={displayName} />;
+                                                    return (
+                                                      <ExerciseRow
+                                                        key={ex.id}
+                                                        ex={ex}
+                                                        displayName={displayName}
+                                                        isSelectionMode={isExerciseSelectionMode}
+                                                        isSelected={!!selectedExerciseIds[ex.id]}
+                                                        onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                                                      />
+                                                    );
                                                 })}
                                             </div>
                                         )}
@@ -715,7 +1052,15 @@ export const GoalDetails: React.FC = () => {
                             })}
 
                             {/* Render Ungrouped Items */}
-                            {ungrouped.map(ex => <ExerciseRow key={ex.id} ex={ex} />)}
+                            {ungrouped.map(ex => (
+                              <ExerciseRow
+                                key={ex.id}
+                                ex={ex}
+                                isSelectionMode={isExerciseSelectionMode}
+                                isSelected={!!selectedExerciseIds[ex.id]}
+                                onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                              />
+                            ))}
                           </div>
                        </div>
                    </div>
@@ -792,6 +1137,8 @@ export const GoalDetails: React.FC = () => {
         message={confirmModal.message}
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
         isDestructive={confirmModal.isDestructive}
       />
 

@@ -101,6 +101,13 @@ export const storageService = {
     if (error) console.error('Error deleting topic:', error);
   },
 
+  deleteTopics: async (ids: string[]) => {
+    if (!ids || ids.length === 0) return { data: null, error: null };
+    const response = await supabase.from('topics').delete().in('id', ids);
+    if (response.error) console.error('Error deleting topics:', response.error);
+    return response;
+  },
+
   // Checklist Items
   getChecklistItems: async (topicId?: string): Promise<ChecklistItem[]> => {
     let query = supabase.from('checklist_items').select('*').order('created_at', { ascending: true });
@@ -239,6 +246,13 @@ export const storageService = {
   deleteExercise: async (id: string) => {
     const response = await supabase.from('exercises').delete().eq('id', id);
     if (response.error) console.error('Error deleting exercise:', response.error);
+    return response;
+  },
+
+  deleteExercises: async (ids: string[]) => {
+    if (!ids || ids.length === 0) return { data: null, error: null };
+    const response = await supabase.from('exercises').delete().in('id', ids);
+    if (response.error) console.error('Error deleting exercises:', response.error);
     return response;
   },
 
