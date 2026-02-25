@@ -30,9 +30,8 @@ function startOfLocalDay(ts: number) {
 function computeScheduledAt(ex: Exercise): number | null {
   if (ex.status === 'new') return null;
 
-  if (ex.status === 'green') {
-    return ex.nextReviewAt ?? null;
-  }
+  // User expectation: green = done (do not schedule again). Only red items reappear.
+  if (ex.status === 'green') return null;
 
   // red
   if (ex.nextReviewAt) return ex.nextReviewAt;

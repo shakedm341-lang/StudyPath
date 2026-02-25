@@ -25,29 +25,30 @@ export const ReviewSession: React.FC = () => {
 
   const handleResult = async (success: boolean) => {
     const currentEx = queue[currentIndex];
+    const now = Date.now();
     
     // Update Attempt History
     const attempt: Attempt = {
       id: '', // DB generates
       exerciseId: currentEx.id,
       result: success ? 'success' : 'failure',
-      timestamp: Date.now()
+      timestamp: now
     };
     await storageService.logAttempt(attempt);
 
     // Update Exercise Status & Next Review
     const updatedEx = { ...currentEx };
-    updatedEx.lastAttemptedAt = Date.now();
+    updatedEx.lastAttemptedAt = now;
     
     if (success) {
       updatedEx.status = 'green';
       updatedEx.consecutiveSuccesses += 1;
-      const daysToAdd = Math.pow(2, updatedEx.consecutiveSuccesses - 1); 
-      updatedEx.nextReviewAt = Date.now() + (daysToAdd * 24 * 60 * 60 * 1000);
+      // green = done (do not schedule again)
+      updatedEx.nextReviewAt = null;
     } else {
       updatedEx.status = 'red';
       updatedEx.consecutiveSuccesses = 0;
-      updatedEx.nextReviewAt = Date.now() + (24 * 60 * 60 * 1000); 
+      updatedEx.nextReviewAt = now + (24 * 60 * 60 * 1000);
     }
     
     await storageService.updateExercise(updatedEx);

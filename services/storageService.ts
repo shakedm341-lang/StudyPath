@@ -277,23 +277,18 @@ export const storageService = {
     const now = Date.now();
 
     return allExercises.filter(ex => {
-      // 1. New exercises (Gray) are NOT automatically in review queue.
-      // They must be attempted once manually to enter the cycle.
-      if (ex.status === 'new') return false;
+      // App behavior: green = done (never scheduled again). Only red items come back.
+      if (ex.status !== 'red') return false;
 
-      // 2. If status is 'red' (failed), review after 24 hours from last attempt
-      if (ex.status === 'red') {
-        if (!ex.lastAttemptedAt) return true; // Should not happen if red, but fallback
-        const oneDayMs = 24 * 60 * 60 * 1000;
-        return (now - ex.lastAttemptedAt) >= oneDayMs;
-      }
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      const dueAt =
+        ex.nextReviewAt ??
+        (ex.lastAttemptedAt ? ex.lastAttemptedAt + oneDayMs : null);
 
-      // 3. If status is 'green' (success), respect the nextReviewAt
-      if (ex.status === 'green' && ex.nextReviewAt) {
-        return now >= ex.nextReviewAt;
-      }
+      // Shouldn't happen, but if we have a red item without timestamps, surface it.
+      if (!dueAt) return true;
 
-      return false;
+      return now >= dueAt;
     });
   }
 };

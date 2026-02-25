@@ -499,26 +499,15 @@ export const GoalDetails: React.FC = () => {
 
   const handleQuickStatusUpdate = async (exercise: Exercise, isSuccess: boolean) => {
     const now = Date.now();
-    let nextReview = now;
-    let consecutive = exercise.consecutiveSuccesses;
-
-    if (isSuccess) {
-        consecutive += 1;
-        // Simple Spaced Repetition Logic
-        const daysToAdd = Math.pow(2, consecutive - 1); 
-        nextReview = now + (daysToAdd * 24 * 60 * 60 * 1000);
-    } else {
-        consecutive = 0;
-        // Strict 24 Hour rule for Red/Failed items
-        nextReview = now + (24 * 60 * 60 * 1000);
-    }
+    const oneDayMs = 24 * 60 * 60 * 1000;
 
     const updatedEx: Exercise = {
         ...exercise,
         status: isSuccess ? 'green' : 'red',
         lastAttemptedAt: now,
-        nextReviewAt: nextReview,
-        consecutiveSuccesses: consecutive
+        // green = done (do not schedule again). red = retry in 24h.
+        nextReviewAt: isSuccess ? null : (now + oneDayMs),
+        consecutiveSuccesses: isSuccess ? (exercise.consecutiveSuccesses + 1) : 0
     };
 
     // Optimistic UI update
@@ -1035,14 +1024,15 @@ export const GoalDetails: React.FC = () => {
                                                 {groupExs.map(ex => {
                                                     const displayName = ex.location.split('::')[1];
                                                     return (
-                                                      <ExerciseRow
-                                                        key={ex.id}
-                                                        ex={ex}
-                                                        displayName={displayName}
-                                                        isSelectionMode={isExerciseSelectionMode}
-                                                        isSelected={!!selectedExerciseIds[ex.id]}
-                                                        onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
-                                                      />
+                                                      <React.Fragment key={ex.id}>
+                                                        <ExerciseRow
+                                                          ex={ex}
+                                                          displayName={displayName}
+                                                          isSelectionMode={isExerciseSelectionMode}
+                                                          isSelected={!!selectedExerciseIds[ex.id]}
+                                                          onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                                                        />
+                                                      </React.Fragment>
                                                     );
                                                 })}
                                             </div>
@@ -1053,13 +1043,14 @@ export const GoalDetails: React.FC = () => {
 
                             {/* Render Ungrouped Items */}
                             {ungrouped.map(ex => (
-                              <ExerciseRow
-                                key={ex.id}
-                                ex={ex}
-                                isSelectionMode={isExerciseSelectionMode}
-                                isSelected={!!selectedExerciseIds[ex.id]}
-                                onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
-                              />
+                              <React.Fragment key={ex.id}>
+                                <ExerciseRow
+                                  ex={ex}
+                                  isSelectionMode={isExerciseSelectionMode}
+                                  isSelected={!!selectedExerciseIds[ex.id]}
+                                  onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                                />
+                              </React.Fragment>
                             ))}
                           </div>
                        </div>
