@@ -5,7 +5,7 @@ import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { storageService } from '../services/storageService';
 import { supabase } from '../services/supabaseClient';
-import { Goal } from '../types';
+import { Goal, DailyStats } from '../types';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -13,6 +13,8 @@ export const Dashboard: React.FC = () => {
   const [reviewCount, setReviewCount] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [todayStats, setTodayStats] = useState<DailyStats | null>(null);
+  const [streak, setStreak] = useState(0);
   
   // Create Goal State
   const [newGoalTitle, setNewGoalTitle] = useState('');
@@ -36,12 +38,16 @@ export const Dashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-        const [loadedGoals, reviewQueue] = await Promise.all([
+        const [loadedGoals, reviewQueue, dailyStats, streakData] = await Promise.all([
             storageService.getGoals(),
-            storageService.getReviewQueue()
+            storageService.getReviewQueue(),
+            storageService.getDailyStats(Date.now()),
+            storageService.getStudyStreak()
         ]);
         setGoals(loadedGoals);
         setReviewCount(reviewQueue.length);
+        setTodayStats(dailyStats);
+        setStreak(streakData.current);
     } catch (e) {
         console.error(e);
     } finally {
@@ -124,6 +130,36 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Today's Stats Widget */}
+      <div 
+        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+        onClick={() => navigate('/stats')}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            סיכום יומי
+          </h3>
+          <span className="text-xs text-blue-600 font-medium">צפה בכל הסטטיסטיקות &larr;</span>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-slate-900">{todayStats?.exercisesReviewed || 0}</div>
+            <div className="text-xs text-slate-500">תרגילים נסקרו</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-slate-900">{todayStats?.checklistCompleted || 0}</div>
+            <div className="text-xs text-slate-500">משימות הושלמו</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">{streak}</div>
+            <div className="text-xs text-slate-500">ימים רצופים</div>
+          </div>
+        </div>
+      </div>
 
       {/* Goals Grid */}
       <div>

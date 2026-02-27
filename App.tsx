@@ -6,6 +6,7 @@ import { Dashboard } from './pages/Dashboard';
 import { GoalDetails } from './pages/GoalDetails';
 import { ReviewSession } from './pages/ReviewSession';
 import { WeeklyPlan } from './pages/WeeklyPlan';
+import { DailyStats } from './pages/DailyStats';
 import { Auth } from './pages/Auth';
 
 const App: React.FC = () => {
@@ -43,6 +44,7 @@ const App: React.FC = () => {
           <Route path="/goal/:id" element={<GoalDetails />} />
           <Route path="/review" element={<ReviewSession />} />
           <Route path="/plan" element={<WeeklyPlan />} />
+          <Route path="/stats" element={<DailyStats />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>

@@ -5,6 +5,7 @@ import { Goal, Topic, Exercise, Attempt, ChecklistItem } from '../types';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { computeNextReviewDay } from '../utils/dateUtils';
 
 export const GoalDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -499,14 +500,13 @@ export const GoalDetails: React.FC = () => {
 
   const handleQuickStatusUpdate = async (exercise: Exercise, isSuccess: boolean) => {
     const now = Date.now();
-    const oneDayMs = 24 * 60 * 60 * 1000;
 
     const updatedEx: Exercise = {
         ...exercise,
         status: isSuccess ? 'green' : 'red',
         lastAttemptedAt: now,
-        // green = done (do not schedule again). red = retry in 24h.
-        nextReviewAt: isSuccess ? null : (now + oneDayMs),
+        // green = done (do not schedule again). red = retry next day (with evening cutoff).
+        nextReviewAt: isSuccess ? null : computeNextReviewDay(now),
         consecutiveSuccesses: isSuccess ? (exercise.consecutiveSuccesses + 1) : 0
     };
 

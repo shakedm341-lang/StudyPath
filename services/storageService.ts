@@ -1,5 +1,18 @@
 import { supabase } from './supabaseClient';
-import { Goal, Topic, Exercise, Attempt, ChecklistItem } from '../types';
+import { Goal, Topic, Exercise, Attempt, ChecklistItem, DailyStats, ActivityFeedItem } from '../types';
+import { computeNextReviewDay } from '../utils/dateUtils';
+
+function startOfDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function endOfDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
 
 export const storageService = {
   // Goals
@@ -122,7 +135,8 @@ export const storageService = {
         goalId: c.goal_id,
         text: c.text,
         isCompleted: c.is_completed,
-        dueDate: c.due_date ? new Date(c.due_date).getTime() : null
+        dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
+        completedAt: c.completed_at ? Number(c.completed_at) : null
     }));
   },
 
@@ -139,7 +153,8 @@ export const storageService = {
         goalId: c.goal_id,
         text: c.text,
         isCompleted: c.is_completed,
-        dueDate: c.due_date ? new Date(c.due_date).getTime() : null
+        dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
+        completedAt: c.completed_at ? Number(c.completed_at) : null
     }));
   },
 
@@ -161,7 +176,8 @@ export const storageService = {
 
   toggleChecklistItem: async (id: string, isCompleted: boolean) => {
     const { error } = await supabase.from('checklist_items').update({
-        is_completed: isCompleted
+        is_completed: isCompleted,
+        completed_at: isCompleted ? Date.now() : null
     }).eq('id', id);
 
     if (error) console.error('Error updating checklist item:', error);
@@ -280,15 +296,245 @@ export const storageService = {
       // App behavior: green = done (never scheduled again). Only red items come back.
       if (ex.status !== 'red') return false;
 
-      const oneDayMs = 24 * 60 * 60 * 1000;
       const dueAt =
         ex.nextReviewAt ??
-        (ex.lastAttemptedAt ? ex.lastAttemptedAt + oneDayMs : null);
+        (ex.lastAttemptedAt ? computeNextReviewDay(ex.lastAttemptedAt) : null);
 
       // Shouldn't happen, but if we have a red item without timestamps, surface it.
       if (!dueAt) return true;
 
       return now >= dueAt;
     });
+  },
+
+  // --- Daily Statistics ---
+
+  getAttemptsByDateRange: async (from: number, to: number): Promise<Attempt[]> => {
+    const { data, error } = await supabase
+      .from('attempts')
+      .select('*')
+      .gte('timestamp', from)
+      .lte('timestamp', to)
+      .order('timestamp', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching attempts:', error);
+      return [];
+    }
+
+    return data.map((a: any) => ({
+      id: a.id,
+      exerciseId: a.exercise_id,
+      result: a.result,
+      timestamp: Number(a.timestamp)
+    }));
+  },
+
+  getCompletedChecklistByDateRange: async (from: number, to: number): Promise<ChecklistItem[]> => {
+    const { data, error } = await supabase
+      .from('checklist_items')
+      .select('*')
+      .eq('is_completed', true)
+      .gte('completed_at', from)
+      .lte('completed_at', to)
+      .order('completed_at', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching completed checklist items:', error);
+      return [];
+    }
+
+    return data.map((c: any) => ({
+      id: c.id,
+      topicId: c.topic_id,
+      goalId: c.goal_id,
+      text: c.text,
+      isCompleted: c.is_completed,
+      dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
+      completedAt: c.completed_at ? Number(c.completed_at) : null
+    }));
+  },
+
+  getDailyStats: async (dateTs: number): Promise<DailyStats> => {
+    const dayStart = startOfDay(dateTs);
+    const dayEnd = endOfDay(dateTs);
+
+    const [attempts, completedChecklist] = await Promise.all([
+      storageService.getAttemptsByDateRange(dayStart, dayEnd),
+      storageService.getCompletedChecklistByDateRange(dayStart, dayEnd)
+    ]);
+
+    const succeeded = attempts.filter(a => a.result === 'success').length;
+    const failed = attempts.filter(a => a.result === 'failure').length;
+
+    return {
+      date: dayStart,
+      exercisesReviewed: attempts.length,
+      exercisesSucceeded: succeeded,
+      exercisesFailed: failed,
+      checklistCompleted: completedChecklist.length,
+      totalActivity: attempts.length + completedChecklist.length
+    };
+  },
+
+  getWeeklyStats: async (): Promise<DailyStats[]> => {
+    const now = Date.now();
+    const stats: DailyStats[] = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const dayTs = now - i * 24 * 60 * 60 * 1000;
+      const dayStat = await storageService.getDailyStats(dayTs);
+      stats.push(dayStat);
+    }
+
+    return stats;
+  },
+
+  getActivityFeed: async (dateTs: number): Promise<ActivityFeedItem[]> => {
+    const dayStart = startOfDay(dateTs);
+    const dayEnd = endOfDay(dateTs);
+
+    const [attempts, completedChecklist] = await Promise.all([
+      storageService.getAttemptsByDateRange(dayStart, dayEnd),
+      storageService.getCompletedChecklistByDateRange(dayStart, dayEnd)
+    ]);
+
+    // We need exercise locations for display
+    const exerciseIds = [...new Set(attempts.map(a => a.exerciseId))];
+    let exerciseMap = new Map<string, string>();
+
+    if (exerciseIds.length > 0) {
+      const { data } = await supabase
+        .from('exercises')
+        .select('id, location')
+        .in('id', exerciseIds);
+
+      if (data) {
+        data.forEach((e: any) => {
+          const loc = e.location.includes('::')
+            ? e.location.split('::').join(': ')
+            : e.location;
+          exerciseMap.set(e.id, loc);
+        });
+      }
+    }
+
+    const feed: ActivityFeedItem[] = [];
+
+    for (const a of attempts) {
+      const location = exerciseMap.get(a.exerciseId) || 'תרגיל';
+      feed.push({
+        id: a.id,
+        type: 'attempt',
+        timestamp: a.timestamp,
+        description: location,
+        result: a.result
+      });
+    }
+
+    for (const c of completedChecklist) {
+      feed.push({
+        id: c.id,
+        type: 'checklist',
+        timestamp: c.completedAt || dayStart,
+        description: c.text
+      });
+    }
+
+    // Sort by timestamp descending (most recent first)
+    feed.sort((a, b) => b.timestamp - a.timestamp);
+
+    return feed;
+  },
+
+  getStudyStreak: async (): Promise<{ current: number; longest: number }> => {
+    // Fetch all attempts ordered by timestamp
+    const { data: attemptData, error: attemptError } = await supabase
+      .from('attempts')
+      .select('timestamp')
+      .order('timestamp', { ascending: false });
+
+    // Fetch all completed checklist items with completed_at
+    const { data: checklistData, error: checklistError } = await supabase
+      .from('checklist_items')
+      .select('completed_at')
+      .eq('is_completed', true)
+      .not('completed_at', 'is', null)
+      .order('completed_at', { ascending: false });
+
+    if (attemptError || checklistError) {
+      console.error('Error fetching streak data:', attemptError || checklistError);
+      return { current: 0, longest: 0 };
+    }
+
+    // Collect all unique activity days
+    const daySet = new Set<string>();
+
+    (attemptData || []).forEach((a: any) => {
+      const d = new Date(Number(a.timestamp));
+      daySet.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+
+    (checklistData || []).forEach((c: any) => {
+      if (c.completed_at) {
+        const d = new Date(Number(c.completed_at));
+        daySet.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      }
+    });
+
+    if (daySet.size === 0) return { current: 0, longest: 0 };
+
+    // Convert to sorted array of day timestamps (start of day)
+    const days = Array.from(daySet).map(key => {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m, d).getTime();
+    }).sort((a, b) => b - a); // Descending
+
+    const MS_DAY = 24 * 60 * 60 * 1000;
+    const todayStart = startOfDay(Date.now());
+    const yesterdayStart = todayStart - MS_DAY;
+
+    // Current streak: must include today or yesterday
+    let current = 0;
+    if (days[0] >= yesterdayStart) {
+      current = 1;
+      for (let i = 1; i < days.length; i++) {
+        const diff = days[i - 1] - days[i];
+        if (diff <= MS_DAY) {
+          current++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Longest streak
+    let longest = 1;
+    let streak = 1;
+    for (let i = 1; i < days.length; i++) {
+      const diff = days[i - 1] - days[i];
+      if (diff <= MS_DAY) {
+        streak++;
+        longest = Math.max(longest, streak);
+      } else {
+        streak = 1;
+      }
+    }
+    longest = Math.max(longest, current);
+
+    return { current, longest };
+  },
+
+  getPendingCount: async (): Promise<number> => {
+    // Count exercises that are new or red, plus incomplete checklist items
+    const [exercises, checklistItems] = await Promise.all([
+      storageService.getAllExercises(),
+      storageService.getAllChecklistItems()
+    ]);
+
+    const pendingExercises = exercises.filter(e => e.status !== 'green').length;
+    const pendingChecklist = checklistItems.filter(c => !c.isCompleted).length;
+
+    return pendingExercises + pendingChecklist;
   }
 };

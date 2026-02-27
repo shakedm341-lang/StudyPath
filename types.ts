@@ -24,6 +24,7 @@ export interface ChecklistItem {
   text: string;
   isCompleted: boolean;
   dueDate?: number | null; // Timestamp
+  completedAt?: number | null; // Timestamp of when it was completed
 }
 
 export type ExerciseStatus = 'new' | 'green' | 'red';
@@ -55,4 +56,21 @@ export interface GeneratedPlan {
       location: string;
     }[];
   }[];
+}
+
+export interface DailyStats {
+  date: number; // Start-of-day timestamp
+  exercisesReviewed: number;
+  exercisesSucceeded: number;
+  exercisesFailed: number;
+  checklistCompleted: number;
+  totalActivity: number; // exercisesReviewed + checklistCompleted
+}
+
+export interface ActivityFeedItem {
+  id: string;
+  type: 'attempt' | 'checklist';
+  timestamp: number;
+  description: string;
+  result?: 'success' | 'failure'; // For attempts
 }

@@ -4,6 +4,7 @@ import { storageService } from '../services/storageService';
 import { Exercise, Attempt } from '../types';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { computeNextReviewDay } from '../utils/dateUtils';
 
 export const ReviewSession: React.FC = () => {
   const navigate = useNavigate();
@@ -48,7 +49,7 @@ export const ReviewSession: React.FC = () => {
     } else {
       updatedEx.status = 'red';
       updatedEx.consecutiveSuccesses = 0;
-      updatedEx.nextReviewAt = now + (24 * 60 * 60 * 1000);
+      updatedEx.nextReviewAt = computeNextReviewDay(now);
     }
     
     await storageService.updateExercise(updatedEx);
@@ -143,7 +144,7 @@ export const ReviewSession: React.FC = () => {
                     className="w-full sm:w-40" 
                     onClick={() => handleResult(false)}
                   >
-                    לא (24ש)
+                    לא (מחר)
                   </Button>
                   <Button 
                     variant="success" 

@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { storageService } from '../services/storageService';
 import { Exercise, Goal, Topic } from '../types';
+import { computeNextReviewDay } from '../utils/dateUtils';
 
 type ScheduledExercise = {
   exercise: Exercise;
@@ -35,7 +36,7 @@ function computeScheduledAt(ex: Exercise): number | null {
 
   // red
   if (ex.nextReviewAt) return ex.nextReviewAt;
-  if (ex.lastAttemptedAt) return ex.lastAttemptedAt + MS_DAY;
+  if (ex.lastAttemptedAt) return computeNextReviewDay(ex.lastAttemptedAt);
   return null;
 }
 
