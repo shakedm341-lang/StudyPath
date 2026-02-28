@@ -21,12 +21,12 @@ export const storageService = {
       .from('goals')
       .select('*')
       .order('created_at', { ascending: false });
-    
+
     if (error) {
       console.error('Error fetching goals:', error);
       return [];
     }
-    
+
     // Map snake_case from DB to camelCase for app
     return data.map((g: any) => ({
       id: g.id,
@@ -38,7 +38,7 @@ export const storageService = {
       completedExercises: g.completed_exercises
     }));
   },
-  
+
   saveGoal: async (goal: Partial<Goal>) => {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
@@ -78,7 +78,7 @@ export const storageService = {
   getTopics: async (goalId?: string): Promise<Topic[]> => {
     let query = supabase.from('topics').select('*');
     if (goalId) query = query.eq('goal_id', goalId);
-    
+
     const { data, error } = await query;
     if (error) return [];
 
@@ -130,13 +130,13 @@ export const storageService = {
     if (error) return [];
 
     return data.map((c: any) => ({
-        id: c.id,
-        topicId: c.topic_id,
-        goalId: c.goal_id,
-        text: c.text,
-        isCompleted: c.is_completed,
-        dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
-        completedAt: c.completed_at ? Number(c.completed_at) : null
+      id: c.id,
+      topicId: c.topic_id,
+      goalId: c.goal_id,
+      text: c.text,
+      isCompleted: c.is_completed,
+      dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
+      completedAt: c.completed_at ? Number(c.completed_at) : null
     }));
   },
 
@@ -148,13 +148,13 @@ export const storageService = {
     if (error) return [];
 
     return data.map((c: any) => ({
-        id: c.id,
-        topicId: c.topic_id,
-        goalId: c.goal_id,
-        text: c.text,
-        isCompleted: c.is_completed,
-        dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
-        completedAt: c.completed_at ? Number(c.completed_at) : null
+      id: c.id,
+      topicId: c.topic_id,
+      goalId: c.goal_id,
+      text: c.text,
+      isCompleted: c.is_completed,
+      dueDate: c.due_date ? new Date(c.due_date).getTime() : null,
+      completedAt: c.completed_at ? Number(c.completed_at) : null
     }));
   },
 
@@ -163,21 +163,21 @@ export const storageService = {
     if (!user) return;
 
     const { error } = await supabase.from('checklist_items').insert({
-        user_id: user.id,
-        goal_id: item.goalId,
-        topic_id: item.topicId,
-        text: item.text,
-        is_completed: item.isCompleted || false,
-        due_date: item.dueDate ? new Date(item.dueDate).toISOString() : null
+      user_id: user.id,
+      goal_id: item.goalId,
+      topic_id: item.topicId,
+      text: item.text,
+      is_completed: item.isCompleted || false,
+      due_date: item.dueDate ? new Date(item.dueDate).toISOString() : null
     });
-    
+
     if (error) console.error('Error saving checklist item:', error);
   },
 
   toggleChecklistItem: async (id: string, isCompleted: boolean) => {
     const { error } = await supabase.from('checklist_items').update({
-        is_completed: isCompleted,
-        completed_at: isCompleted ? Date.now() : null
+      is_completed: isCompleted,
+      completed_at: isCompleted ? Date.now() : null
     }).eq('id', id);
 
     if (error) console.error('Error updating checklist item:', error);
@@ -192,7 +192,7 @@ export const storageService = {
   getExercises: async (topicId?: string): Promise<Exercise[]> => {
     let query = supabase.from('exercises').select('*');
     if (topicId) query = query.eq('topic_id', topicId);
-    
+
     const { data, error } = await query;
     if (error) return [];
 
@@ -379,14 +379,16 @@ export const storageService = {
 
   getWeeklyStats: async (): Promise<DailyStats[]> => {
     const now = Date.now();
-    const stats: DailyStats[] = [];
+    const promises: Promise<DailyStats>[] = [];
 
+    // Queue up the 7 days of requests to run concurrently
     for (let i = 6; i >= 0; i--) {
       const dayTs = now - i * 24 * 60 * 60 * 1000;
-      const dayStat = await storageService.getDailyStats(dayTs);
-      stats.push(dayStat);
+      promises.push(storageService.getDailyStats(dayTs));
     }
 
+    // Wait for all 7 days to finish simultaneously
+    const stats = await Promise.all(promises);
     return stats;
   },
 
