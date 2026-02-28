@@ -842,15 +842,27 @@ export const GoalDetails: React.FC = () => {
                       </div>
                       <p className="text-slate-500 text-sm mt-1 pr-7">{topic.description}</p>
                       
-                      <div className="mt-4 flex items-center gap-4 text-sm pr-7">
-                          <span className="flex items-center gap-1 text-slate-600">
-                             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                             {stats.total} משימות
+                      <div className="mt-4 space-y-2 pr-7">
+                        <div className="flex items-center gap-4 text-sm">
+                            <span className="flex items-center gap-1 text-slate-600">
+                               <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                               {stats.total} משימות
+                            </span>
+                             <span className="flex items-center gap-1 text-green-600 font-medium">
+                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                               {readiness}% מוכנות
+                            </span>
+                        </div>
+                        {/* Subject progress bar */}
+                        <div className="relative h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${readiness === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                            style={{ width: `${readiness}%` }}
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                            {readiness}%
                           </span>
-                           <span className="flex items-center gap-1 text-green-600 font-medium">
-                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                             {readiness}% מוכנות
-                          </span>
+                        </div>
                       </div>
                   </div>
                   
