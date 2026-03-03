@@ -8,6 +8,7 @@ import { ReviewSession } from './pages/ReviewSession';
 import { WeeklyPlan } from './pages/WeeklyPlan';
 import { DailyStats } from './pages/DailyStats';
 import { Auth } from './pages/Auth';
+import { ExamView } from './pages/ExamView';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -42,6 +43,7 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/goal/:id" element={<GoalDetails />} />
+          <Route path="/goal/:id/exam/:examId" element={<ExamView />} />
           <Route path="/review" element={<ReviewSession />} />
           <Route path="/plan" element={<WeeklyPlan />} />
           <Route path="/stats" element={<DailyStats />} />

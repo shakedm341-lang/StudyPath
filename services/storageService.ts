@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
-import { Goal, Topic, Exercise, Attempt, ChecklistItem, DailyStats, ActivityFeedItem } from '../types';
+import { Goal, Topic, Exercise, Attempt, ChecklistItem, DailyStats, ActivityFeedItem, Exam } from '../types';
 import { computeNextReviewDay } from '../utils/dateUtils';
+// Since we are in a modern browser, crypto.randomUUID() is available.
 
 function startOfDay(ts: number): number {
   const d = new Date(ts);
@@ -15,6 +16,55 @@ function endOfDay(ts: number): number {
 }
 
 export const storageService = {
+  // Exams
+  getExams: async (goalId?: string): Promise<Exam[]> => {
+    let query = supabase.from('exams').select('*').order('created_at', { ascending: false });
+    if (goalId) query = query.eq('goal_id', goalId);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching exams:', error);
+      return [];
+    }
+    return data.map((x: any) => ({
+      id: x.id,
+      goalId: x.goal_id,
+      title: x.title,
+      description: x.description,
+      createdAt: new Date(x.created_at).getTime()
+    }));
+  },
+
+  saveExam: async (exam: Partial<Exam>) => {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+    const payload: any = {
+      user_id: user.id,
+      goal_id: exam.goalId,
+      title: exam.title,
+      description: exam.description
+    };
+    if (exam.id) {
+      payload.id = exam.id;
+    }
+
+    const { error } = await supabase.from('exams').insert(payload);
+    if (error) console.error('Error saving exam:', error);
+  },
+
+  updateExam: async (exam: Exam) => {
+    const { error } = await supabase.from('exams').update({
+      title: exam.title,
+      description: exam.description
+    }).eq('id', exam.id);
+    if (error) console.error('Error updating exam:', error);
+  },
+
+  deleteExam: async (id: string) => {
+    const { error } = await supabase.from('exams').delete().eq('id', id);
+    if (error) console.error('Error deleting exam:', error);
+  },
+
   // Goals
   getGoals: async (): Promise<Goal[]> => {
     const { data, error } = await supabase
@@ -190,15 +240,21 @@ export const storageService = {
 
   // Exercises
   getExercises: async (topicId?: string): Promise<Exercise[]> => {
-    let query = supabase.from('exercises').select('*');
-    if (topicId) query = query.eq('topic_id', topicId);
+    let query = supabase.from('exercises').select(`*, exercise_topics!inner(topic_id)`);
+    if (topicId) {
+      query = query.eq('exercise_topics.topic_id', topicId);
+    }
 
     const { data, error } = await query;
-    if (error) return [];
+    if (error) {
+      console.error('Error fetching exercises:', error);
+      return [];
+    }
 
     return data.map((e: any) => ({
       id: e.id,
-      topicId: e.topic_id,
+      topicIds: e.exercise_topics ? e.exercise_topics.map((t: any) => t.topic_id) : [],
+      examId: e.exam_id,
       goalId: e.goal_id,
       location: e.location,
       status: e.status,
@@ -209,16 +265,21 @@ export const storageService = {
     }));
   },
 
-  getAllExercises: async (goalId?: string): Promise<Exercise[]> => {
-    let query = supabase.from('exercises').select('*');
+  getAllExercises: async (goalId?: string, examId?: string): Promise<Exercise[]> => {
+    let query = supabase.from('exercises').select(`*, exercise_topics(topic_id)`);
     if (goalId) query = query.eq('goal_id', goalId);
+    if (examId) query = query.eq('exam_id', examId);
 
     const { data, error } = await query;
-    if (error) return [];
+    if (error) {
+      console.error('Error fetching all exercises:', error);
+      return [];
+    }
 
     return data.map((e: any) => ({
       id: e.id,
-      topicId: e.topic_id,
+      topicIds: e.exercise_topics ? e.exercise_topics.map((t: any) => t.topic_id) : [],
+      examId: e.exam_id,
       goalId: e.goal_id,
       location: e.location,
       status: e.status,
@@ -231,13 +292,19 @@ export const storageService = {
 
   saveExercises: async (exercises: Exercise[]) => {
     const user = (await supabase.auth.getUser()).data.user;
-    if (!user) return;
+    if (!user || exercises.length === 0) return;
 
-    const records = exercises.map(e => ({
-      // id: e.id, // Let DB generate
+    // Use existing IDs or generate new ones so we can link them in the junction table
+    const exWithIds = exercises.map(e => ({
+      ...e,
+      id: e.id ? e.id : crypto.randomUUID()
+    }));
+
+    const records = exWithIds.map(e => ({
+      id: e.id,
       user_id: user.id,
       goal_id: e.goalId,
-      topic_id: e.topicId,
+      exam_id: e.examId || null,
       location: e.location,
       status: 'new',
       consecutive_successes: 0,
@@ -245,7 +312,26 @@ export const storageService = {
     }));
 
     const { error } = await supabase.from('exercises').insert(records);
-    if (error) console.error('Error saving exercises:', error);
+    if (error) {
+      console.error('Error saving exercises:', error);
+      return;
+    }
+
+    // Now insert into junction table
+    const topicRecords: any[] = [];
+    exWithIds.forEach(e => {
+      e.topicIds.forEach(tId => {
+        topicRecords.push({
+          exercise_id: e.id,
+          topic_id: tId
+        });
+      });
+    });
+
+    if (topicRecords.length > 0) {
+      const { error: topicError } = await supabase.from('exercise_topics').insert(topicRecords);
+      if (topicError) console.error('Error saving exercise topics:', topicError);
+    }
   },
 
   updateExercise: async (e: Exercise) => {
@@ -257,6 +343,42 @@ export const storageService = {
     }).eq('id', e.id);
 
     if (error) console.error('Error updating exercise:', error);
+  },
+
+  updateExerciseFull: async (e: Exercise) => {
+    // 1. Update main table
+    const { error: updateError } = await supabase.from('exercises').update({
+      location: e.location,
+      due_date: e.dueDate ? new Date(e.dueDate).toISOString() : null,
+      status: e.status
+    }).eq('id', e.id);
+
+    if (updateError) {
+      console.error('Error updating exercise full:', updateError);
+      return { error: updateError };
+    }
+
+    // 2. Clear old topics
+    const { error: deleteError } = await supabase.from('exercise_topics').delete().eq('exercise_id', e.id);
+    if (deleteError) {
+      console.error('Error deleting old exercise topics:', deleteError);
+      return { error: deleteError };
+    }
+
+    // 3. Insert new topics
+    if (e.topicIds && e.topicIds.length > 0) {
+      const topicRecords = e.topicIds.map(tId => ({
+        exercise_id: e.id,
+        topic_id: tId
+      }));
+      const { error: insertError } = await supabase.from('exercise_topics').insert(topicRecords);
+      if (insertError) {
+        console.error('Error inserting new exercise topics:', insertError);
+        return { error: insertError };
+      }
+    }
+
+    return { error: null };
   },
 
   deleteExercise: async (id: string) => {

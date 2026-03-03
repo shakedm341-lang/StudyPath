@@ -169,7 +169,7 @@ export const WeeklyPlan: React.FC = () => {
                   <div className="space-y-2">
                     {bucket.map(({ exercise, scheduledAt }) => {
                       const goalTitle = goalTitleById.get(exercise.goalId) || 'מטרה';
-                      const topicTitle = topicTitleById.get(exercise.topicId) || 'נושא';
+                      const topicTitle = exercise.topicIds?.map(id => topicTitleById.get(id)).filter(Boolean).join(', ') || 'נושא';
                       const isOverdue = scheduledAt < Date.now() && i === 0;
                       const timeLabel = new Date(scheduledAt).toLocaleTimeString('he-IL', {
                         hour: '2-digit',
@@ -180,9 +180,8 @@ export const WeeklyPlan: React.FC = () => {
                       return (
                         <div
                           key={`${exercise.id}-${scheduledAt}`}
-                          className={`p-3 rounded-lg border flex flex-col gap-1 ${
-                            isOverdue ? 'bg-red-50/40 border-red-200' : 'bg-slate-50 border-slate-200'
-                          }`}
+                          className={`p-3 rounded-lg border flex flex-col gap-1 ${isOverdue ? 'bg-red-50/40 border-red-200' : 'bg-slate-50 border-slate-200'
+                            }`}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">

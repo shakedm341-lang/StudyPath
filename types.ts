@@ -9,6 +9,15 @@ export interface Goal {
   totalExercises: number;
 }
 
+export interface Exam {
+  id: string;
+  goalId: string;
+  title: string;
+  description?: string;
+  createdAt: number;
+}
+
+
 export interface Topic {
   id: string;
   goalId: string;
@@ -27,11 +36,12 @@ export interface ChecklistItem {
   completedAt?: number | null; // Timestamp of when it was completed
 }
 
-export type ExerciseStatus = 'new' | 'green' | 'red';
+export type ExerciseStatus = 'new' | 'green' | 'red' | 'orange';
 
 export interface Exercise {
   id: string;
-  topicId: string;
+  topicIds: string[]; // Replaces topicId, as exercises can belong to multiple topics
+  examId?: string; // Optional reference to an Exam
   goalId: string;
   location: string; // e.g. "Exam 2023 Q3"
   status: ExerciseStatus;
