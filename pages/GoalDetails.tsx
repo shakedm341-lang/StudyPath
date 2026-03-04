@@ -57,6 +57,22 @@ export const GoalDetails: React.FC = () => {
   // Expanded Topics State (For main Accordion)
   const [expandedTopics, setExpandedTopics] = useState<{ [key: string]: boolean }>({});
 
+  // Exam Accordion State
+  const [expandedExams, setExpandedExams] = useState<Record<string, boolean>>({});
+  const [examExercises, setExamExercises] = useState<Record<string, Exercise[]>>({});
+  const [examExerciseLoading, setExamExerciseLoading] = useState<Record<string, boolean>>({});
+  const [activeExamIdForExercise, setActiveExamIdForExercise] = useState<string | null>(null);
+  const [examExLocation, setExamExLocation] = useState('');
+  const [examBulkList, setExamBulkList] = useState('');
+  const [examIsBulkMode, setExamIsBulkMode] = useState(false);
+  const [examExDueDate, setExamExDueDate] = useState('');
+  const [examSelectedTopics, setExamSelectedTopics] = useState<string[]>([]);
+
+  // Exam Edit Mode State
+  const [examEditMode, setExamEditMode] = useState<Record<string, boolean>>({});
+  const [examPendingEdits, setExamPendingEdits] = useState<Record<string, { location: string; topicIds: string[] }>>({});
+  const [openTopicDropdown, setOpenTopicDropdown] = useState<string | null>(null); // exercise id
+
   // Confirm Modal State
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -114,6 +130,121 @@ export const GoalDetails: React.FC = () => {
 
   const toggleTopic = (topicId: string) => {
     setExpandedTopics(prev => ({ ...prev, [topicId]: !prev[topicId] }));
+  };
+
+  const loadExamExercises = async (examId: string) => {
+    if (!id) return;
+    setExamExerciseLoading(prev => ({ ...prev, [examId]: true }));
+    const exs = await storageService.getAllExercises(id, examId);
+    setExamExercises(prev => ({ ...prev, [examId]: exs }));
+    setExamExerciseLoading(prev => ({ ...prev, [examId]: false }));
+  };
+
+  const toggleExam = (examId: string) => {
+    const willOpen = !expandedExams[examId];
+    setExpandedExams(prev => ({ ...prev, [examId]: willOpen }));
+    if (willOpen) {
+      loadExamExercises(examId);
+    }
+  };
+
+  const handleAddExerciseToExam = async () => {
+    if (!activeExamIdForExercise || !id) return;
+    let toSave: Exercise[] = [];
+    if (!examIsBulkMode) {
+      if (!examExLocation.trim()) return;
+      toSave = [{
+        id: '', topicIds: examSelectedTopics, examId: activeExamIdForExercise,
+        goalId: id, location: examExLocation.trim(), status: 'new',
+        consecutiveSuccesses: 0,
+        dueDate: examExDueDate ? new Date(examExDueDate).getTime() : undefined,
+        lastAttemptedAt: undefined, nextReviewAt: undefined,
+      }];
+    } else {
+      if (!examBulkList.trim()) return;
+      const items = examBulkList.split(/[\n,]+/).map(i => i.trim()).filter(i => i.length > 0);
+      toSave = items.map(item => ({
+        id: '', topicIds: examSelectedTopics, examId: activeExamIdForExercise,
+        goalId: id, location: item, status: 'new',
+        consecutiveSuccesses: 0,
+        dueDate: examExDueDate ? new Date(examExDueDate).getTime() : undefined,
+        lastAttemptedAt: undefined, nextReviewAt: undefined,
+      }));
+    }
+    if (toSave.length > 0) {
+      await storageService.saveExercises(toSave);
+      setExamExLocation('');
+      setExamBulkList('');
+      setExamExDueDate('');
+      setExamSelectedTopics([]);
+      setExamIsBulkMode(false);
+      const examId = activeExamIdForExercise;
+      setActiveExamIdForExercise(null);
+      loadExamExercises(examId);
+    }
+  };
+
+  const handleExamEnterEditMode = (examId: string) => {
+    const exs = examExercises[examId] || [];
+    const initial: Record<string, { location: string; topicIds: string[] }> = {};
+    exs.forEach(ex => { initial[ex.id] = { location: ex.location, topicIds: ex.topicIds || [] }; });
+    setExamPendingEdits(initial);
+    setExamEditMode(prev => ({ ...prev, [examId]: true }));
+  };
+
+  const handleExamSaveEdits = async (examId: string) => {
+    const exs = examExercises[examId] || [];
+    const promises: Promise<any>[] = [];
+    for (const ex of exs) {
+      const edit = examPendingEdits[ex.id];
+      if (!edit) continue;
+      const origTopics = [...(ex.topicIds || [])].sort().join(',');
+      const newTopics = [...edit.topicIds].sort().join(',');
+      if (edit.location !== ex.location || origTopics !== newTopics) {
+        promises.push(storageService.updateExerciseFull({ ...ex, location: edit.location, topicIds: edit.topicIds }));
+      }
+    }
+    if (promises.length > 0) await Promise.all(promises);
+    setExamEditMode(prev => ({ ...prev, [examId]: false }));
+    setOpenTopicDropdown(null);
+    loadExamExercises(examId);
+  };
+
+  const handleDeleteExamExercise = (exerciseId: string, examId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'מחיקת שאלה',
+      message: 'האם אתה בטוח שברצונך למחוק שאלה זו?',
+      isDestructive: true,
+      onConfirm: async () => {
+        await storageService.deleteExercise(exerciseId);
+        setExamExercises(prev => ({ ...prev, [examId]: (prev[examId] || []).filter(e => e.id !== exerciseId) }));
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const handleExamStatusChange = async (ex: Exercise, examId: string, isSuccess: boolean) => {
+    const now = Date.now();
+    const targetStatus = isSuccess ? 'green' : 'red';
+
+    // Toggle: clicking the already-active button resets to 'new' (gray)
+    const newStatus = ex.status === targetStatus ? 'new' : targetStatus;
+
+    const updatedEx: Exercise = {
+      ...ex,
+      status: newStatus,
+      lastAttemptedAt: newStatus === 'new' ? null : now,
+      nextReviewAt: newStatus === 'red' ? computeNextReviewDay(now) : null,
+      consecutiveSuccesses: newStatus === 'green' ? ex.consecutiveSuccesses + 1 : 0,
+    };
+    setExamExercises(prev => ({ ...prev, [examId]: (prev[examId] || []).map(e => e.id === ex.id ? updatedEx : e) }));
+    await storageService.updateExercise(updatedEx);
+    // Always clear today's attempts first, then log the new one if not resetting
+    await storageService.deleteAttemptsForExerciseToday(ex.id);
+    if (newStatus !== 'new') {
+      await storageService.logAttempt({ id: '', exerciseId: ex.id, result: isSuccess ? 'success' : 'failure', timestamp: now });
+    }
   };
 
   const exitTopicSelectionMode = () => {
@@ -537,14 +668,17 @@ export const GoalDetails: React.FC = () => {
 
   const handleQuickStatusUpdate = async (exercise: Exercise, isSuccess: boolean) => {
     const now = Date.now();
+    const targetStatus = isSuccess ? 'green' : 'red';
+
+    // Toggle: clicking the already-active button resets to 'new' (gray)
+    const newStatus = exercise.status === targetStatus ? 'new' : targetStatus;
 
     const updatedEx: Exercise = {
       ...exercise,
-      status: isSuccess ? 'green' : 'red',
-      lastAttemptedAt: now,
-      // green = done (do not schedule again). red = retry next day (with evening cutoff).
-      nextReviewAt: isSuccess ? null : computeNextReviewDay(now),
-      consecutiveSuccesses: isSuccess ? (exercise.consecutiveSuccesses + 1) : 0
+      status: newStatus,
+      lastAttemptedAt: newStatus === 'new' ? null : now,
+      nextReviewAt: newStatus === 'red' ? computeNextReviewDay(now) : null,
+      consecutiveSuccesses: newStatus === 'green' ? (exercise.consecutiveSuccesses + 1) : 0
     };
 
     // Optimistic UI update
@@ -553,20 +687,33 @@ export const GoalDetails: React.FC = () => {
     // DB Updates
     await storageService.updateExercise(updatedEx);
 
-    // Log Attempt
-    const attempt: Attempt = {
-      id: '',
-      exerciseId: exercise.id,
-      result: isSuccess ? 'success' : 'failure',
-      timestamp: now
-    };
-    await storageService.logAttempt(attempt);
+    // Always clear today's attempts first, then log the new one if not resetting
+    await storageService.deleteAttemptsForExerciseToday(exercise.id);
+    if (newStatus !== 'new') {
+      const attempt: Attempt = {
+        id: '',
+        exerciseId: exercise.id,
+        result: isSuccess ? 'success' : 'failure',
+        timestamp: now
+      };
+      await storageService.logAttempt(attempt);
+    }
 
-    // Update Goal progress stats if needed
-    if (goal && exercise.status === 'new') {
-      const updatedGoal = { ...goal, completedExercises: goal.completedExercises + 1 };
-      setGoal(updatedGoal);
-      await storageService.updateGoal(updatedGoal);
+    // Update Goal progress stats
+    if (goal) {
+      const wasCompleted = exercise.status !== 'new';
+      const isNowCompleted = newStatus !== 'new';
+      if (!wasCompleted && isNowCompleted) {
+        // new -> marked: increment
+        const updatedGoal = { ...goal, completedExercises: goal.completedExercises + 1 };
+        setGoal(updatedGoal);
+        await storageService.updateGoal(updatedGoal);
+      } else if (wasCompleted && !isNowCompleted) {
+        // marked -> reset: decrement
+        const updatedGoal = { ...goal, completedExercises: Math.max(0, goal.completedExercises - 1) };
+        setGoal(updatedGoal);
+        await storageService.updateGoal(updatedGoal);
+      }
     }
   };
 
@@ -652,12 +799,15 @@ export const GoalDetails: React.FC = () => {
 
     const totalUnits = topicExercises.length + topicChecklist.length;
 
+    const completedEx = topicExercises.filter(e => e.status !== 'new').length;
     const greenEx = topicExercises.filter(e => e.status === 'green').length;
+
     const completedChecklist = topicChecklist.filter(c => c.isCompleted).length;
 
-    const totalMastery = greenEx + completedChecklist;
+    const totalCompleted = completedEx + completedChecklist;
+    const totalMastered = greenEx + completedChecklist;
 
-    return { total: totalUnits, completed: totalMastery };
+    return { total: totalUnits, completed: totalCompleted, mastered: totalMastered };
   };
 
   // Grouping Logic
@@ -852,7 +1002,8 @@ export const GoalDetails: React.FC = () => {
           )}
           {topics.map(topic => {
             const stats = getTopicStats(topic.id);
-            const readiness = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+            const progress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+            const readiness = stats.total > 0 ? Math.round((stats.mastered / stats.total) * 100) : 0;
             const { groups, ungrouped } = getGroupedExercises(topic.id);
             const isExpanded = expandedTopics[topic.id] || false;
             const isExerciseSelectionMode = !!exerciseSelectionModeByTopic[topic.id];
@@ -903,33 +1054,30 @@ export const GoalDetails: React.FC = () => {
                     </div>
                     <p className="text-slate-500 text-sm mt-1 pr-7">{topic.description}</p>
 
-                    <div className="mt-4 space-y-2 pr-7">
+                    <div className="mt-4 space-y-3 pr-7">
+
                       <div className="flex items-center gap-4 text-sm">
-                        <span className="flex items-center gap-1 text-slate-600">
-                          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                          {stats.total} משימות
+                        <span className="flex items-center gap-1.5 text-slate-600 font-medium tracking-wide">
+                          <span className="w-2 h-2 rounded-full bg-blue-500 shadow-sm"></span>
+                          התקדמות: {progress}%
                         </span>
-                        <span className="flex items-center gap-1 text-green-600 font-medium">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          {readiness}% מוכנות
+                        <span className="flex items-center gap-1.5 text-green-700 font-medium tracking-wide">
+                          <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          מוכנות: {readiness}%
                         </span>
+                        <span className="text-xs text-slate-400 font-normal mr-auto">סה"כ: {stats.total} משימות</span>
                       </div>
-                      {/* Subject progress bar */}
-                      <div className="relative h-5 w-full bg-slate-200 rounded-full overflow-hidden mt-1 shadow-inner border border-slate-200/60">
+
+                      {/* Progress Bar */}
+                      <div className="relative h-2 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner border border-slate-200/50">
                         <div
-                          className={`h-full rounded-full transition-all duration-500 ease-out ${readiness === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
-                          style={{ width: `${readiness}%` }}
+                          className="h-full bg-gradient-to-l from-blue-400 to-blue-600 rounded-full transition-all duration-700 ease-out"
+                          style={{ width: `${progress}%` }}
                         />
-                        <span
-                          className="absolute inset-0 flex items-center justify-center text-xs font-bold"
-                          style={{
-                            color: readiness > 45 ? '#ffffff' : '#334155',
-                            textShadow: readiness > 45 ? '0 1px 2px rgba(0,0,0,0.3)' : 'none'
-                          }}
-                        >
-                          {readiness}%
-                        </span>
                       </div>
+
                     </div>
                   </div>
 
@@ -1146,23 +1294,205 @@ export const GoalDetails: React.FC = () => {
               עדיין לא נוספו מבחנים.
             </div>
           )}
-          {exams.map(exam => (
-            <Card key={exam.id} className="hover:shadow-md transition-shadow cursor-pointer relative group" onClick={() => navigate(`/goal/${id}/exam/${exam.id}`)}>
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-xl font-semibold text-slate-900">{exam.title}</h3>
-                  {exam.description && <p className="text-slate-500 mt-1 text-sm">{exam.description}</p>}
+          {exams.map(exam => {
+            const isExpanded = !!expandedExams[exam.id];
+            const isEditMode = !!examEditMode[exam.id];
+            const examExs = examExercises[exam.id] || [];
+            const isLoading = !!examExerciseLoading[exam.id];
+
+            return (
+              <Card key={exam.id} className={`transition-all duration-300 relative group ${isExpanded ? 'ring-2 ring-blue-50' : 'hover:shadow-md'}`}>
+                {/* Header row */}
+                <div className="flex justify-between items-center cursor-pointer" onClick={() => toggleExam(exam.id)}>
+                  <div className="flex items-center gap-3">
+                    <svg
+                      className={`w-5 h-5 text-slate-400 transition-transform duration-200 flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                    <div>
+                      <h3 className="text-xl font-semibold text-slate-900">{exam.title}</h3>
+                      {exam.description && <p className="text-slate-500 mt-0.5 text-sm">{exam.description}</p>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                    {isExpanded && !isEditMode && (
+                      <>
+                        <button
+                          onClick={() => handleExamEnterEditMode(exam.id)}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium transition-colors"
+                        >
+                          עריכת שאלות
+                        </button>
+                        <button
+                          onClick={() => setActiveExamIdForExercise(exam.id)}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium transition-colors"
+                        >
+                          + הוסף שאלות
+                        </button>
+                      </>
+                    )}
+                    {isExpanded && isEditMode && (
+                      <>
+                        <button
+                          onClick={() => { setExamEditMode(prev => ({ ...prev, [exam.id]: false })); setOpenTopicDropdown(null); }}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium transition-colors"
+                        >
+                          ביטול
+                        </button>
+                        <button
+                          onClick={() => handleExamSaveEdits(exam.id)}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
+                        >
+                          שמור שינויים
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteExam(exam.id); }}
+                      className="p-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-500 rounded-lg"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleDeleteExam(exam.id); }}
-                  className="p-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-500 rounded-lg"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                </button>
-              </div>
-            </Card>
-          ))}
+
+                {/* Expanded content */}
+                {isExpanded && (
+                  <div className="mt-4 border-t border-slate-100 pt-4 space-y-2">
+                    {isLoading && <p className="text-sm text-slate-400 text-center py-4">טוען שאלות...</p>}
+                    {!isLoading && examExs.length === 0 && (
+                      <p className="text-sm text-slate-400 italic text-center py-4">עדיין לא נוספו שאלות למבחן זה.</p>
+                    )}
+                    {!isLoading && examExs.map(ex => {
+                      const displayLocation = ex.location.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                      const assignedTopics = topics.filter(t => (examPendingEdits[ex.id]?.topicIds ?? ex.topicIds ?? []).includes(t.id));
+                      const unassignedTopics = topics.filter(t => !(examPendingEdits[ex.id]?.topicIds ?? ex.topicIds ?? []).includes(t.id));
+
+                      return (
+                        <div key={ex.id} className={`flex items-start justify-between p-3 rounded-lg border transition-colors ${ex.status === 'green' ? 'bg-green-50/40 border-green-100' :
+                          ex.status === 'red' ? 'bg-red-50/40 border-red-100' :
+                            'bg-slate-50 border-slate-100'
+                          }`}>
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <span className={`flex-shrink-0 w-3 h-3 rounded-full mt-1 ${ex.status === 'green' ? 'bg-green-500' :
+                              ex.status === 'red' ? 'bg-red-500' :
+                                ex.status === 'orange' ? 'bg-orange-400' : 'bg-slate-300'
+                              }`} />
+                            <div className="flex flex-col min-w-0 flex-1 gap-1">
+                              {isEditMode ? (
+                                <input
+                                  className="text-sm font-medium text-slate-800 border-b border-slate-300 focus:border-blue-500 outline-none px-1 py-0.5 w-full bg-transparent"
+                                  value={examPendingEdits[ex.id]?.location ?? ex.location}
+                                  onChange={e => setExamPendingEdits(prev => ({ ...prev, [ex.id]: { ...prev[ex.id], location: e.target.value } }))}
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-slate-700 truncate">{displayLocation}</span>
+                              )}
+
+                              {/* Topic tags */}
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                {assignedTopics.map(t => (
+                                  <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                    {t.title}
+                                    {isEditMode && (
+                                      <button
+                                        onClick={() => setExamPendingEdits(prev => ({
+                                          ...prev,
+                                          [ex.id]: { ...prev[ex.id], topicIds: prev[ex.id].topicIds.filter(tid => tid !== t.id) }
+                                        }))}
+                                        className="hover:text-red-500 ml-0.5 transition-colors"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                      </button>
+                                    )}
+                                  </span>
+                                ))}
+
+                                {/* + נושא dropdown */}
+                                {isEditMode && unassignedTopics.length > 0 && (
+                                  <div className="relative">
+                                    <button
+                                      onClick={() => setOpenTopicDropdown(prev => prev === ex.id ? null : ex.id)}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 hover:bg-blue-50 text-slate-500 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-300 transition-colors"
+                                    >
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                      </svg>
+                                      נושא
+                                    </button>
+                                    {openTopicDropdown === ex.id && (
+                                      <div className="absolute z-50 top-full mt-1 right-0 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden min-w-[160px]">
+                                        {unassignedTopics.map(t => (
+                                          <button
+                                            key={t.id}
+                                            onClick={() => {
+                                              setExamPendingEdits(prev => ({
+                                                ...prev,
+                                                [ex.id]: { ...prev[ex.id], topicIds: [...(prev[ex.id]?.topicIds || []), t.id] }
+                                              }));
+                                              setOpenTopicDropdown(null);
+                                            }}
+                                            className="block w-full text-right px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                          >
+                                            {t.title}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-1 flex-shrink-0 mr-2">
+                            {!isEditMode && (
+                              <>
+                                <button
+                                  onClick={() => handleExamStatusChange(ex, exam.id, false)}
+                                  title="נכשל"
+                                  className={`p-1.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors ${ex.status === 'red' ? 'text-red-500 bg-red-50' : ''}`}
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleExamStatusChange(ex, exam.id, true)}
+                                  title="הצלחה"
+                                  className={`p-1.5 rounded hover:bg-green-100 text-slate-400 hover:text-green-600 transition-colors ${ex.status === 'green' ? 'text-green-500 bg-green-50' : ''}`}
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleDeleteExamExercise(ex.id, exam.id)}
+                              title="מחק שאלה"
+                              className="p-1.5 text-slate-300 hover:bg-red-50 hover:text-red-500 rounded transition-colors"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -1451,6 +1781,94 @@ export const GoalDetails: React.FC = () => {
               <Button onClick={handleAddExercise} disabled={(!isBulkMode && !exLocation.trim()) || (isBulkMode && (!bulkSource.trim() || !bulkList.trim()))}>
                 צור תרגיל{isBulkMode && 'ים'}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exam Exercise Creation Modal */}
+      {activeExamIdForExercise && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden animate-fade-in-up flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50 flex-shrink-0">
+              <h3 className="text-xl font-semibold text-slate-800">הוספת שאלות למבחן</h3>
+              <button
+                onClick={() => { setActiveExamIdForExercise(null); setExamExLocation(''); setExamBulkList(''); setExamSelectedTopics([]); setExamIsBulkMode(false); }}
+                className="text-slate-400 hover:text-slate-600 bg-white hover:bg-slate-100 rounded-full p-2 transition-colors shadow-sm"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Single / Bulk toggle */}
+              <div className="flex items-center gap-4 p-1 bg-slate-100 rounded-xl">
+                <button onClick={() => setExamIsBulkMode(false)} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${!examIsBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'}`}>הזנה בודדת</button>
+                <button onClick={() => setExamIsBulkMode(true)} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${examIsBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'}`}>הזנה מרובה</button>
+              </div>
+
+              {!examIsBulkMode ? (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">זיהוי השאלה</label>
+                  <input
+                    type="text" placeholder="למשל: שאלה 1, או תרגיל 5"
+                    value={examExLocation} onChange={e => setExamExLocation(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors shadow-sm"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm leading-relaxed">צור רשימת שאלות שייכנסו למבחן.</div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">מספרי שאלות (מופרדים בפסיק, רווח או אנטר)</label>
+                    <textarea
+                      placeholder={"לדוגמה:\n1, 2, 3\nאו\n1א\n1ב"}
+                      value={examBulkList} onChange={e => setExamBulkList(e.target.value)}
+                      rows={4}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors shadow-sm resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Topic selection */}
+              {topics.length > 0 && (
+                <div className="border-t border-slate-100 pt-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">שיוך לנושאים (אופציונלי)</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-40 overflow-y-auto space-y-1">
+                    {topics.map(topic => (
+                      <label key={topic.id} className="flex items-center gap-3 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          checked={examSelectedTopics.includes(topic.id)}
+                          onChange={() => setExamSelectedTopics(prev => prev.includes(topic.id) ? prev.filter(t => t !== topic.id) : [...prev, topic.id])}
+                        />
+                        <span className="text-sm text-slate-700">{topic.title}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
+              <button
+                onClick={() => { setActiveExamIdForExercise(null); setExamExLocation(''); setExamBulkList(''); setExamSelectedTopics([]); setExamIsBulkMode(false); }}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={handleAddExerciseToExam}
+                disabled={(!examIsBulkMode && !examExLocation.trim()) || (examIsBulkMode && !examBulkList.trim())}
+                className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+              >
+                שמור שאלו{examIsBulkMode ? 'ת' : 'ה'} במבחן
+              </button>
             </div>
           </div>
         </div>

@@ -395,6 +395,18 @@ export const storageService = {
   },
 
   // Attempts
+  deleteAttemptsForExerciseToday: async (exerciseId: string) => {
+    const dayStart = startOfDay(Date.now());
+    const dayEnd = endOfDay(Date.now());
+    const { error } = await supabase
+      .from('attempts')
+      .delete()
+      .eq('exercise_id', exerciseId)
+      .gte('timestamp', dayStart)
+      .lte('timestamp', dayEnd);
+    if (error) console.error('Error deleting today attempts:', error);
+  },
+
   logAttempt: async (attempt: Attempt) => {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
@@ -481,21 +493,44 @@ export const storageService = {
     const dayStart = startOfDay(dateTs);
     const dayEnd = endOfDay(dateTs);
 
-    const [attempts, completedChecklist] = await Promise.all([
+    const [allAttempts, completedChecklist] = await Promise.all([
       storageService.getAttemptsByDateRange(dayStart, dayEnd),
       storageService.getCompletedChecklistByDateRange(dayStart, dayEnd)
     ]);
 
-    const succeeded = attempts.filter(a => a.result === 'success').length;
-    const failed = attempts.filter(a => a.result === 'failure').length;
+    // Keep only the LATEST attempt per exercise
+    const latestByExercise = new Map<string, typeof allAttempts[0]>();
+    for (const a of allAttempts) {
+      const existing = latestByExercise.get(a.exerciseId);
+      if (!existing || a.timestamp > existing.timestamp) {
+        latestByExercise.set(a.exerciseId, a);
+      }
+    }
+
+    // Filter out exercises that were reset to 'new' (gray)
+    const exerciseIds = Array.from(latestByExercise.keys());
+    let activeAttempts = Array.from(latestByExercise.values());
+    if (exerciseIds.length > 0) {
+      const { data } = await supabase
+        .from('exercises')
+        .select('id, status')
+        .in('id', exerciseIds);
+      if (data) {
+        const newIds = new Set(data.filter((e: any) => e.status === 'new').map((e: any) => e.id));
+        activeAttempts = activeAttempts.filter(a => !newIds.has(a.exerciseId));
+      }
+    }
+
+    const succeeded = activeAttempts.filter(a => a.result === 'success').length;
+    const failed = activeAttempts.filter(a => a.result === 'failure').length;
 
     return {
       date: dayStart,
-      exercisesReviewed: attempts.length,
+      exercisesReviewed: activeAttempts.length,
       exercisesSucceeded: succeeded,
       exercisesFailed: failed,
       checklistCompleted: completedChecklist.length,
-      totalActivity: attempts.length + completedChecklist.length
+      totalActivity: activeAttempts.length + completedChecklist.length
     };
   },
 
@@ -518,34 +553,51 @@ export const storageService = {
     const dayStart = startOfDay(dateTs);
     const dayEnd = endOfDay(dateTs);
 
-    const [attempts, completedChecklist] = await Promise.all([
+    const [allAttempts, completedChecklist] = await Promise.all([
       storageService.getAttemptsByDateRange(dayStart, dayEnd),
       storageService.getCompletedChecklistByDateRange(dayStart, dayEnd)
     ]);
 
-    // We need exercise locations for display
-    const exerciseIds = [...new Set(attempts.map(a => a.exerciseId))];
+    // Keep only the LATEST attempt per exercise
+    const latestByExercise = new Map<string, typeof allAttempts[0]>();
+    for (const a of allAttempts) {
+      const existing = latestByExercise.get(a.exerciseId);
+      if (!existing || a.timestamp > existing.timestamp) {
+        latestByExercise.set(a.exerciseId, a);
+      }
+    }
+
+    // Fetch current status + location for each exercise, filter out 'new' (reset to gray)
+    const exerciseIds = Array.from(latestByExercise.keys());
     let exerciseMap = new Map<string, string>();
+    let activeAttempts = Array.from(latestByExercise.values());
 
     if (exerciseIds.length > 0) {
       const { data } = await supabase
         .from('exercises')
-        .select('id, location')
+        .select('id, location, status')
         .in('id', exerciseIds);
 
       if (data) {
+        const newIds = new Set<string>();
         data.forEach((e: any) => {
-          const loc = e.location.includes('::')
-            ? e.location.split('::').join(': ')
-            : e.location;
-          exerciseMap.set(e.id, loc);
+          if (e.status === 'new') {
+            newIds.add(e.id);
+          } else {
+            const loc = e.location.includes('::')
+              ? e.location.split('::').join(': ')
+              : e.location;
+            exerciseMap.set(e.id, loc);
+          }
         });
+        // Remove exercises that are currently 'new' (reset to gray)
+        activeAttempts = activeAttempts.filter(a => !newIds.has(a.exerciseId));
       }
     }
 
     const feed: ActivityFeedItem[] = [];
 
-    for (const a of attempts) {
+    for (const a of activeAttempts) {
       const location = exerciseMap.get(a.exerciseId) || 'תרגיל';
       feed.push({
         id: a.id,

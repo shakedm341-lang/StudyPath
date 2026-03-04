@@ -37,7 +37,6 @@ export const ExamView: React.FC = () => {
     const [exDueDate, setExDueDate] = useState('');
     const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
     const [isBulkMode, setIsBulkMode] = useState(false);
-    const [bulkSource, setBulkSource] = useState('');
     const [bulkList, setBulkList] = useState('');
 
     const [isGlobalEditMode, setIsGlobalEditMode] = useState(false);
@@ -86,7 +85,7 @@ export const ExamView: React.FC = () => {
                 nextReviewAt: undefined,
             });
         } else {
-            if (!bulkSource.trim() || !bulkList.trim()) return;
+            if (!bulkList.trim()) return;
             const items = bulkList
                 .split(/[\n,]+/)
                 .map(i => i.trim())
@@ -97,7 +96,7 @@ export const ExamView: React.FC = () => {
                 topicIds: selectedTopics,
                 examId: examId,
                 goalId: id,
-                location: `${bulkSource.trim()}::${item}`,
+                location: item,
                 status: 'new',
                 consecutiveSuccesses: 0,
                 dueDate: exDueDate ? new Date(exDueDate).getTime() : undefined,
@@ -110,7 +109,6 @@ export const ExamView: React.FC = () => {
             try {
                 await storageService.saveExercises(toSave);
                 setExLocation('');
-                setBulkSource('');
                 setBulkList('');
                 setExDueDate('');
                 setSelectedTopics([]);
@@ -365,7 +363,6 @@ export const ExamView: React.FC = () => {
                                     setShowExerciseModal(false);
                                     setIsBulkMode(false);
                                     setExLocation('');
-                                    setBulkSource('');
                                     setBulkList('');
                                     setSelectedTopics([]);
                                 }}
@@ -418,19 +415,6 @@ export const ExamView: React.FC = () => {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                            חלק/פרק (אופציונלי)
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="למשל: פרק א', חלק 2"
-                                            value={bulkSource}
-                                            onChange={(e) => setBulkSource(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors shadow-sm"
-                                            autoFocus
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1.5">
                                             מספרי שאלות (מופרדים בפסיק, רווח או אנטר)
                                         </label>
                                         <textarea
@@ -477,7 +461,6 @@ export const ExamView: React.FC = () => {
                                 setShowExerciseModal(false);
                                 setIsBulkMode(false);
                                 setExLocation('');
-                                setBulkSource('');
                                 setBulkList('');
                                 setSelectedTopics([]);
                             }}>
