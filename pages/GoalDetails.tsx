@@ -54,6 +54,9 @@ export const GoalDetails: React.FC = () => {
   // Collapsed Groups State (For internal exercise grouping)
   const [collapsedGroups, setCollapsedGroups] = useState<{ [key: string]: boolean }>({});
 
+  // Exercise Filter State per topic
+  const [exerciseFilterByTopic, setExerciseFilterByTopic] = useState<Record<string, 'all' | 'needs-review' | 'to-complete'>>({});
+
   // Expanded Topics State (For main Accordion)
   const [expandedTopics, setExpandedTopics] = useState<{ [key: string]: boolean }>({});
 
@@ -829,8 +832,8 @@ export const GoalDetails: React.FC = () => {
     return { groups, ungrouped };
   };
 
-  // Inline render function to prevent scope issues
-  const ExerciseRow = ({
+  // Compact card for grid display
+  const ExerciseCard = ({
     ex,
     displayName,
     isSelectionMode,
@@ -844,89 +847,45 @@ export const GoalDetails: React.FC = () => {
     onToggleSelected?: () => void;
   }) => {
     const isOverdue = ex.dueDate && ex.dueDate < Date.now() && ex.status === 'new';
-    return (
-      <div className={`flex items-center justify-between p-3 bg-slate-50 rounded-lg border transition-colors hover:bg-slate-100 group relative ${isOverdue ? 'border-red-200 bg-red-50/30' : 'border-slate-100'}`}>
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          {isSelectionMode && (
-            <input
-              type="checkbox"
-              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              checked={!!isSelected}
-              onChange={(e) => {
-                e.stopPropagation();
-                onToggleSelected?.();
-              }}
-              aria-label={`בחר תרגיל ${displayName || ex.location}`}
-            />
-          )}
-          <span className={`flex-shrink-0 w-3 h-3 rounded-full ${ex.status === 'green' ? 'bg-green-500' :
-            ex.status === 'red' ? 'bg-red-500' :
-              ex.status === 'orange' ? 'bg-orange-400' :
-                'bg-slate-300'
-            }`}></span>
-          <div className="flex flex-col min-w-0 flex-1">
-            <div className={`text-sm font-medium flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 ${ex.status === 'new' ? 'text-slate-500' : 'text-slate-700'}`}>
-              {ex.examId && exams.find(e => e.id === ex.examId) && (
-                <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold w-fit border border-blue-100">
-                  {exams.find(e => e.id === ex.examId)?.title}
-                </span>
-              )}
-              <span className="truncate">{displayName || ex.location}</span>
-            </div>
-            {ex.dueDate && (
-              <span className={`text-xs ${isOverdue ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
-                {isOverdue ? 'באיחור: ' : 'יעד: '}
-                {new Date(ex.dueDate).toLocaleDateString('he-IL')}
-              </span>
-            )}
-          </div>
-        </div>
+    const label = displayName || ex.location;
 
-        <div className="flex items-center gap-2 z-[50]">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleQuickStatusUpdate(ex, false);
-            }}
-            title="סמן כנכשל/בוצע בקושי"
-            className={`p-1.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors ${ex.status === 'red' ? 'text-red-500 bg-red-50' : ''}`}
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleQuickStatusUpdate(ex, true);
-            }}
-            title="סמן כבוצע בהצלחה"
-            className={`p-1.5 rounded hover:bg-green-100 text-slate-400 hover:text-green-600 transition-colors ${ex.status === 'green' ? 'text-green-500 bg-green-50' : ''}`}
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              console.log('Trash clicked', ex.id);
-              handleDeleteExercise(ex);
-            }}
-            title="מחק תרגיל"
-            className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors cursor-pointer"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
-        </div>
+    const cardBase =
+      ex.status === 'green'
+        ? 'bg-green-50 border-green-200 text-green-800'
+        : ex.status === 'red'
+          ? 'bg-red-50 border-red-200 text-red-800'
+          : isOverdue
+            ? 'bg-red-50/40 border-red-200 text-slate-700'
+            : 'bg-white border-slate-200 text-slate-700';
+
+    return (
+      <div
+        className={`relative flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2 min-h-[72px] cursor-pointer select-none transition-all duration-150 hover:shadow-md active:scale-95 ${cardBase}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          // green → click → new (reset), red → click → new (reset), new → click → green
+          // handleQuickStatusUpdate toggles: if current === target → reset to 'new'
+          handleQuickStatusUpdate(ex, ex.status !== 'red');
+        }}
+        title={label}
+      >
+        {isSelectionMode && (
+          <input
+            type="checkbox"
+            className="absolute top-1 right-1 w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            checked={!!isSelected}
+            onChange={(e) => { e.stopPropagation(); onToggleSelected?.(); }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
+        {/* Status Icon */}
+        <span className="text-base leading-none">
+          {ex.status === 'green' ? '✓' : ex.status === 'red' ? '✗' : '○'}
+        </span>
+        {/* Label */}
+        <span className="text-xs font-semibold leading-tight text-center line-clamp-2 w-full px-0.5">
+          {label}
+        </span>
       </div>
     );
   };
@@ -1173,6 +1132,7 @@ export const GoalDetails: React.FC = () => {
 
                     {/* Exercises Section */}
                     <div className="mt-2 pt-2 border-t border-slate-100">
+                      {/* Section header row */}
                       <div className="flex items-center justify-between gap-2 mb-3 mt-2">
                         <h4 className="text-sm font-semibold text-slate-700">תרגילים (חזרה מרווחת)</h4>
                         {!isExerciseSelectionMode ? (
@@ -1202,43 +1162,93 @@ export const GoalDetails: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <div className="space-y-3">
+
+                      {/* Filter Chips */}
+                      {(() => {
+                        const activeFilter = exerciseFilterByTopic[topic.id] || 'all';
+                        const setFilter = (f: 'all' | 'needs-review' | 'to-complete') =>
+                          setExerciseFilterByTopic(prev => ({ ...prev, [topic.id]: f }));
+                        const needsReviewCount = exercises.filter(e => e.topicIds?.includes(topic.id) && e.status === 'red').length;
+                        const toCompleteCount = exercises.filter(e => e.topicIds?.includes(topic.id) && e.status === 'new').length;
+
+                        return (
+                          <div className="flex gap-2 mb-4 flex-wrap">
+                            <button
+                              onClick={() => setFilter('all')}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${activeFilter === 'all'
+                                ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                                }`}
+                            >
+                              הכל
+                            </button>
+                            <button
+                              onClick={() => setFilter('needs-review')}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${activeFilter === 'needs-review'
+                                ? 'bg-red-500 text-white border-red-500 shadow-sm'
+                                : 'bg-red-50 text-red-600 border-red-200 hover:border-red-400'
+                                }`}
+                            >
+                              צריך חזרה {needsReviewCount > 0 && `(${needsReviewCount})`}
+                            </button>
+                            <button
+                              onClick={() => setFilter('to-complete')}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${activeFilter === 'to-complete'
+                                ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                                : 'bg-green-50 text-green-700 border-green-200 hover:border-green-400'
+                                }`}
+                            >
+                              להשלמה {toCompleteCount > 0 && `(${toCompleteCount})`}
+                            </button>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Exercises Content */}
+                      <div className="space-y-4">
                         {ungrouped.length === 0 && Object.keys(groups).length === 0 && (
                           <p className="text-sm text-slate-400 italic">אין תרגילים בנושא זה.</p>
                         )}
 
-                        {/* Render Groups First */}
+                        {/* Grouped exercises */}
                         {Object.keys(groups).map(groupName => {
                           const groupExs = groups[groupName];
                           const completed = groupExs.filter(e => e.status !== 'new').length;
                           const total = groupExs.length;
-                          const isCollapsed = collapsedGroups[topic.id + groupName]; // Unique key logic
+                          const isCollapsed = collapsedGroups[topic.id + groupName];
+                          const activeFilter = exerciseFilterByTopic[topic.id] || 'all';
+
+                          const filteredGroupExs = groupExs.filter(ex => {
+                            if (activeFilter === 'needs-review') return ex.status === 'red';
+                            if (activeFilter === 'to-complete') return ex.status === 'new';
+                            return true;
+                          });
+
+                          if (filteredGroupExs.length === 0 && activeFilter !== 'all') return null;
 
                           return (
-                            <div key={groupName} className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                            <div key={groupName} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                              {/* Group header */}
                               <div
-                                className="bg-slate-50 p-3 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition-colors"
+                                className="bg-slate-50 px-3 py-2.5 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition-colors"
                                 onClick={(e) => { e.stopPropagation(); toggleGroup(topic.id + groupName); }}
                               >
                                 <div className="flex items-center gap-2">
-                                  <svg className={`w-4 h-4 text-slate-500 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <svg className={`w-4 h-4 text-slate-400 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                   </svg>
                                   <h5 className="font-semibold text-slate-800 text-sm">{groupName}</h5>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className="text-xs text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
-                                    {completed} / {total} הושלמו
-                                  </div>
+                                  <span className="text-xs text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
+                                    {completed}/{total}
+                                  </span>
+                                  {/* Trash for whole group – low opacity, hover to reveal */}
                                   <button
                                     type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      handleDeleteExerciseGroup(topic.id, groupName, groupExs);
-                                    }}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteExerciseGroup(topic.id, groupName, groupExs); }}
                                     title="מחק קבוצה"
-                                    className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
+                                    className="p-1.5 rounded hover:bg-red-50 text-slate-300 opacity-40 hover:opacity-100 hover:text-red-500 transition-all"
                                   >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1246,39 +1256,54 @@ export const GoalDetails: React.FC = () => {
                                   </button>
                                 </div>
                               </div>
+
+                              {/* Grid of exercise cards */}
                               {!isCollapsed && (
-                                <div className="p-2 space-y-2 border-t border-slate-100">
-                                  {groupExs.map(ex => {
-                                    const displayName = ex.location.split('::')[1];
-                                    return (
-                                      <React.Fragment key={ex.id}>
-                                        <ExerciseRow
+                                <div className="p-3 border-t border-slate-100">
+                                  <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
+                                    {(activeFilter === 'all' ? groupExs : filteredGroupExs).map(ex => {
+                                      const displayName = ex.location.split('::')[1];
+                                      return (
+                                        <ExerciseCard
+                                          key={ex.id}
                                           ex={ex}
                                           displayName={displayName}
                                           isSelectionMode={isExerciseSelectionMode}
                                           isSelected={!!selectedExerciseIds[ex.id]}
                                           onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
                                         />
-                                      </React.Fragment>
-                                    );
-                                  })}
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               )}
                             </div>
                           );
                         })}
 
-                        {/* Render Ungrouped Items */}
-                        {ungrouped.map(ex => (
-                          <React.Fragment key={ex.id}>
-                            <ExerciseRow
-                              ex={ex}
-                              isSelectionMode={isExerciseSelectionMode}
-                              isSelected={!!selectedExerciseIds[ex.id]}
-                              onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
-                            />
-                          </React.Fragment>
-                        ))}
+                        {/* Ungrouped exercises grid */}
+                        {(() => {
+                          const activeFilter = exerciseFilterByTopic[topic.id] || 'all';
+                          const filteredUngrouped = ungrouped.filter(ex => {
+                            if (activeFilter === 'needs-review') return ex.status === 'red';
+                            if (activeFilter === 'to-complete') return ex.status === 'new';
+                            return true;
+                          });
+                          if (filteredUngrouped.length === 0) return null;
+                          return (
+                            <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
+                              {filteredUngrouped.map(ex => (
+                                <ExerciseCard
+                                  key={ex.id}
+                                  ex={ex}
+                                  isSelectionMode={isExerciseSelectionMode}
+                                  isSelected={!!selectedExerciseIds[ex.id]}
+                                  onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                                />
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
