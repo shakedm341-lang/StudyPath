@@ -863,9 +863,15 @@ export const GoalDetails: React.FC = () => {
         className={`relative flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2 min-h-[72px] cursor-pointer select-none transition-all duration-150 hover:shadow-md active:scale-95 ${cardBase}`}
         onClick={(e) => {
           e.stopPropagation();
-          // green → click → new (reset), red → click → new (reset), new → click → green
-          // handleQuickStatusUpdate toggles: if current === target → reset to 'new'
-          handleQuickStatusUpdate(ex, ex.status !== 'red');
+          // Cycle: new → green → red → new
+          if (ex.status === 'new') {
+            handleQuickStatusUpdate(ex, true);   // new → green
+          } else if (ex.status === 'green') {
+            handleQuickStatusUpdate(ex, false);  // green → red
+          } else {
+            // red → new: pass current status as target to trigger toggle-reset
+            handleQuickStatusUpdate(ex, false);  // red → new (toggle off red)
+          }
         }}
         title={label}
       >
