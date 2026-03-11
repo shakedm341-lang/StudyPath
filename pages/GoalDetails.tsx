@@ -57,6 +57,10 @@ export const GoalDetails: React.FC = () => {
   // Exercise Filter State per topic
   const [exerciseFilterByTopic, setExerciseFilterByTopic] = useState<Record<string, 'all' | 'needs-review' | 'to-complete'>>({});
 
+  // Exercise Edit / Group-Add State
+  const [renamingExercise, setRenamingExercise] = useState<{ ex: Exercise; newName: string } | null>(null);
+  const [addingToGroup, setAddingToGroup] = useState<{ topicId: string; groupName: string } | null>(null);
+
   // Expanded Topics State (For main Accordion)
   const [expandedTopics, setExpandedTopics] = useState<{ [key: string]: boolean }>({});
 
@@ -153,12 +157,23 @@ export const GoalDetails: React.FC = () => {
 
   const handleAddExerciseToExam = async () => {
     if (!activeExamIdForExercise || !id) return;
+    const examTitle = exams.find(e => e.id === activeExamIdForExercise)?.title || '';
+    const GROUP_NAME = 'שאלות ממבחנים';
+
+    const buildLocation = (rawLocation: string) => {
+      if (examSelectedTopics.length > 0) {
+        // Format: "שאלות ממבחנים::Exam Title - Question Name"
+        return `${GROUP_NAME}::${examTitle ? examTitle + ' - ' : ''}${rawLocation}`;
+      }
+      return rawLocation;
+    };
+
     let toSave: Exercise[] = [];
     if (!examIsBulkMode) {
       if (!examExLocation.trim()) return;
       toSave = [{
         id: '', topicIds: examSelectedTopics, examId: activeExamIdForExercise,
-        goalId: id, location: examExLocation.trim(), status: 'new',
+        goalId: id, location: buildLocation(examExLocation.trim()), status: 'new',
         consecutiveSuccesses: 0,
         dueDate: examExDueDate ? new Date(examExDueDate).getTime() : undefined,
         lastAttemptedAt: undefined, nextReviewAt: undefined,
@@ -168,7 +183,7 @@ export const GoalDetails: React.FC = () => {
       const items = examBulkList.split(/[\n,]+/).map(i => i.trim()).filter(i => i.length > 0);
       toSave = items.map(item => ({
         id: '', topicIds: examSelectedTopics, examId: activeExamIdForExercise,
-        goalId: id, location: item, status: 'new',
+        goalId: id, location: buildLocation(item), status: 'new',
         consecutiveSuccesses: 0,
         dueDate: examExDueDate ? new Date(examExDueDate).getTime() : undefined,
         lastAttemptedAt: undefined, nextReviewAt: undefined,
@@ -197,14 +212,31 @@ export const GoalDetails: React.FC = () => {
 
   const handleExamSaveEdits = async (examId: string) => {
     const exs = examExercises[examId] || [];
+    const examTitle = exams.find(e => e.id === examId)?.title || '';
+    const GROUP_NAME = 'שאלות ממבחנים';
     const promises: Promise<any>[] = [];
     for (const ex of exs) {
       const edit = examPendingEdits[ex.id];
       if (!edit) continue;
       const origTopics = [...(ex.topicIds || [])].sort().join(',');
       const newTopics = [...edit.topicIds].sort().join(',');
-      if (edit.location !== ex.location || origTopics !== newTopics) {
-        promises.push(storageService.updateExerciseFull({ ...ex, location: edit.location, topicIds: edit.topicIds }));
+
+      // Derive updated location based on topic assignment changes
+      let newLocation = edit.location;
+      const hadTopics = (ex.topicIds || []).length > 0;
+      const hasTopicsNow = edit.topicIds.length > 0;
+      const isAlreadyGrouped = edit.location.startsWith(`${GROUP_NAME}::`);
+
+      if (hasTopicsNow && !isAlreadyGrouped) {
+        // Gained topic(s): wrap in group
+        newLocation = `${GROUP_NAME}::${examTitle ? examTitle + ' - ' : ''}${edit.location}`;
+      } else if (!hasTopicsNow && hadTopics && isAlreadyGrouped) {
+        // Lost all topics: strip group prefix
+        newLocation = edit.location.replace(`${GROUP_NAME}::`, '').replace(`${examTitle} - `, '');
+      }
+
+      if (newLocation !== ex.location || origTopics !== newTopics) {
+        promises.push(storageService.updateExerciseFull({ ...ex, location: newLocation, topicIds: edit.topicIds }));
       }
     }
     if (promises.length > 0) await Promise.all(promises);
@@ -622,7 +654,27 @@ export const GoalDetails: React.FC = () => {
     setBulkList('');
     setIsBulkMode(false);
     setActiveTopicIdForExercise(null);
+    setAddingToGroup(null);
     loadData();
+  };
+
+  const handleRenameExercise = async () => {
+    if (!renamingExercise) return;
+    const { ex, newName } = renamingExercise;
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+
+    // Derive group prefix from existing location
+    const parts = ex.location.split('::');
+    const newLocation = parts.length >= 2
+      ? `${parts[0]}::${trimmed}`
+      : trimmed;
+
+    // Optimistic update
+    setExercises(prev => prev.map(e => e.id === ex.id ? { ...e, location: newLocation } : e));
+    setRenamingExercise(null);
+
+    await storageService.updateExerciseFull({ ...ex, location: newLocation });
   };
 
   const handleDeleteExercise = (ex: Exercise) => {
@@ -838,13 +890,15 @@ export const GoalDetails: React.FC = () => {
     displayName,
     isSelectionMode,
     isSelected,
-    onToggleSelected
+    onToggleSelected,
+    isGrouped
   }: {
     ex: Exercise;
     displayName?: string;
     isSelectionMode?: boolean;
     isSelected?: boolean;
     onToggleSelected?: () => void;
+    isGrouped?: boolean;
   }) => {
     const isOverdue = ex.dueDate && ex.dueDate < Date.now() && ex.status === 'new';
     const label = displayName || ex.location;
@@ -860,7 +914,7 @@ export const GoalDetails: React.FC = () => {
 
     return (
       <div
-        className={`relative flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2 min-h-[72px] cursor-pointer select-none transition-all duration-150 hover:shadow-md active:scale-95 ${cardBase}`}
+        className={`group/card relative flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2 min-h-[72px] cursor-pointer select-none transition-all duration-150 hover:shadow-md active:scale-95 ${cardBase}`}
         onClick={(e) => {
           e.stopPropagation();
           // Cycle: new → green → red → new
@@ -883,6 +937,23 @@ export const GoalDetails: React.FC = () => {
             onChange={(e) => { e.stopPropagation(); onToggleSelected?.(); }}
             onClick={(e) => e.stopPropagation()}
           />
+        )}
+        {/* Rename pencil – only for grouped cards, hidden until hover */}
+        {isGrouped && !isSelectionMode && (
+          <button
+            type="button"
+            title="שנה שם"
+            className="absolute top-1 left-1 p-0.5 rounded opacity-0 group-hover/card:opacity-100 transition-opacity hover:bg-white/70"
+            onClick={(e) => {
+              e.stopPropagation();
+              const currentName = ex.location.split('::')[1] ?? ex.location;
+              setRenamingExercise({ ex, newName: currentName });
+            }}
+          >
+            <svg className="w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
         )}
         {/* Status Icon */}
         <span className="text-base leading-none">
@@ -1217,7 +1288,7 @@ export const GoalDetails: React.FC = () => {
                         )}
 
                         {/* Grouped exercises */}
-                        {Object.keys(groups).map(groupName => {
+                        {Object.keys(groups).sort((a, b) => a.localeCompare(b, 'he', { numeric: true, sensitivity: 'base' })).map(groupName => {
                           const groupExs = groups[groupName];
                           const completed = groupExs.filter(e => e.status !== 'new').length;
                           const total = groupExs.length;
@@ -1249,6 +1320,25 @@ export const GoalDetails: React.FC = () => {
                                   <span className="text-xs text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
                                     {completed}/{total}
                                   </span>
+                                  {/* Add to group button */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setAddingToGroup({ topicId: topic.id, groupName });
+                                      setBulkSource(groupName);
+                                      setBulkList('');
+                                      setIsBulkMode(true);
+                                      setActiveTopicIdForExercise(topic.id);
+                                    }}
+                                    title="הוסף תרגילים לקבוצה"
+                                    className="p-1.5 rounded hover:bg-blue-50 text-slate-300 opacity-40 hover:opacity-100 hover:text-blue-500 transition-all"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                  </button>
                                   {/* Trash for whole group – low opacity, hover to reveal */}
                                   <button
                                     type="button"
@@ -1267,7 +1357,7 @@ export const GoalDetails: React.FC = () => {
                               {!isCollapsed && (
                                 <div className="p-3 border-t border-slate-100">
                                   <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
-                                    {(activeFilter === 'all' ? groupExs : filteredGroupExs).map(ex => {
+                                    {(activeFilter === 'all' ? groupExs : filteredGroupExs).slice().sort((a, b) => { const na = a.location.split('::')[1] ?? a.location; const nb = b.location.split('::')[1] ?? b.location; return na.localeCompare(nb, 'he', { numeric: true, sensitivity: 'base' }); }).map(ex => {
                                       const displayName = ex.location.split('::')[1];
                                       return (
                                         <ExerciseCard
@@ -1277,6 +1367,7 @@ export const GoalDetails: React.FC = () => {
                                           isSelectionMode={isExerciseSelectionMode}
                                           isSelected={!!selectedExerciseIds[ex.id]}
                                           onToggleSelected={() => toggleExerciseSelected(topic.id, ex.id)}
+                                          isGrouped
                                         />
                                       );
                                     })}
@@ -1298,7 +1389,7 @@ export const GoalDetails: React.FC = () => {
                           if (filteredUngrouped.length === 0) return null;
                           return (
                             <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
-                              {filteredUngrouped.map(ex => (
+                              {filteredUngrouped.slice().sort((a, b) => a.location.localeCompare(b.location, 'he', { numeric: true, sensitivity: 'base' })).map(ex => (
                                 <ExerciseCard
                                   key={ex.id}
                                   ex={ex}
@@ -1398,8 +1489,32 @@ export const GoalDetails: React.FC = () => {
                     {!isLoading && examExs.length === 0 && (
                       <p className="text-sm text-slate-400 italic text-center py-4">עדיין לא נוספו שאלות למבחן זה.</p>
                     )}
-                    {!isLoading && examExs.map(ex => {
-                      const displayLocation = ex.location.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                    {!isLoading && [...examExs].sort((a, b) => {
+                      const GROUP_NAME = 'שאלות ממבחנים';
+                      const getDisplay = (ex: Exercise) => {
+                        const raw = ex.location;
+                        if (raw.startsWith(`${GROUP_NAME}::`)) {
+                          const after = raw.slice(`${GROUP_NAME}::`.length);
+                          const prefix = exam.title ? `${exam.title} - ` : '';
+                          return prefix && after.startsWith(prefix) ? after.slice(prefix.length) : after;
+                        }
+                        return raw.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                      };
+                      return getDisplay(a).localeCompare(getDisplay(b), 'he', { numeric: true, sensitivity: 'base' });
+                    }).map(ex => {
+                      // Under Tests: show original question name only (strip group prefix + exam title)
+                      const GROUP_NAME = 'שאלות ממבחנים';
+                      const rawLoc = ex.location;
+                      let displayLocation: string;
+                      if (rawLoc.startsWith(`${GROUP_NAME}::`)) {
+                        const afterGroup = rawLoc.slice(`${GROUP_NAME}::`.length);
+                        const examPrefix = exam.title ? `${exam.title} - ` : '';
+                        displayLocation = examPrefix && afterGroup.startsWith(examPrefix)
+                          ? afterGroup.slice(examPrefix.length)
+                          : afterGroup;
+                      } else {
+                        displayLocation = rawLoc.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                      }
                       const assignedTopics = topics.filter(t => (examPendingEdits[ex.id]?.topicIds ?? ex.topicIds ?? []).includes(t.id));
                       const unassignedTopics = topics.filter(t => !(examPendingEdits[ex.id]?.topicIds ?? ex.topicIds ?? []).includes(t.id));
 
@@ -1694,13 +1809,17 @@ export const GoalDetails: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden animate-fade-in-up">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-xl font-semibold text-slate-800">תרגיל חדש</h3>
+              <h3 className="text-xl font-semibold text-slate-800">
+                {addingToGroup ? `הוספה לקבוצה: ${addingToGroup.groupName}` : 'תרגיל חדש'}
+              </h3>
               <button
                 onClick={() => {
                   setActiveTopicIdForExercise(null);
+                  setAddingToGroup(null);
                   setExLocation('');
                   setBulkSource('');
                   setBulkList('');
+                  setIsBulkMode(false);
                 }}
                 className="text-slate-400 hover:text-slate-600 bg-white hover:bg-slate-100 rounded-full p-2 transition-colors shadow-sm"
               >
@@ -1711,22 +1830,25 @@ export const GoalDetails: React.FC = () => {
             </div>
             <div className="p-6 space-y-6">
 
-              <div className="flex items-center gap-4 p-1 bg-slate-100 rounded-xl">
-                <button
-                  onClick={() => setIsBulkMode(false)}
-                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${!isBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'
-                    }`}
-                >
-                  הזנה בודדת
-                </button>
-                <button
-                  onClick={() => setIsBulkMode(true)}
-                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${isBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'
-                    }`}
-                >
-                  הזנה מרובה
-                </button>
-              </div>
+              {/* Hide the mode toggle when adding to an existing group */}
+              {!addingToGroup && (
+                <div className="flex items-center gap-4 p-1 bg-slate-100 rounded-xl">
+                  <button
+                    onClick={() => setIsBulkMode(false)}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${!isBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'
+                      }`}
+                  >
+                    הזנה בודדת
+                  </button>
+                  <button
+                    onClick={() => setIsBulkMode(true)}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${isBulkMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-200/50'
+                      }`}
+                  >
+                    הזנה מרובה
+                  </button>
+                </div>
+              )}
 
               {!isBulkMode ? (
                 <>
@@ -1803,9 +1925,11 @@ export const GoalDetails: React.FC = () => {
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
               <Button variant="ghost" onClick={() => {
                 setActiveTopicIdForExercise(null);
+                setAddingToGroup(null);
                 setExLocation('');
                 setBulkSource('');
                 setBulkList('');
+                setIsBulkMode(false);
               }}>
                 ביטול
               </Button>
@@ -1900,6 +2024,40 @@ export const GoalDetails: React.FC = () => {
               >
                 שמור שאלו{examIsBulkMode ? 'ת' : 'ה'} במבחן
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Exercise Modal */}
+      {renamingExercise && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden animate-fade-in-up">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+              <h3 className="text-xl font-semibold text-slate-800">שינוי שם תרגיל</h3>
+              <button
+                onClick={() => setRenamingExercise(null)}
+                className="text-slate-400 hover:text-slate-600 bg-white hover:bg-slate-100 rounded-full p-2 transition-colors shadow-sm"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">שם התרגיל</label>
+              <input
+                type="text"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors shadow-sm"
+                value={renamingExercise.newName}
+                onChange={e => setRenamingExercise(prev => prev ? { ...prev, newName: e.target.value } : null)}
+                onKeyDown={e => e.key === 'Enter' && handleRenameExercise()}
+                autoFocus
+              />
+            </div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setRenamingExercise(null)}>ביטול</Button>
+              <Button onClick={handleRenameExercise} disabled={!renamingExercise.newName.trim()}>שמור</Button>
             </div>
           </div>
         </div>

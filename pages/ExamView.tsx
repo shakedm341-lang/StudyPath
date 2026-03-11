@@ -68,6 +68,16 @@ export const ExamView: React.FC = () => {
     const handleAddExercise = async () => {
         if (!id || !examId) return;
 
+        const GROUP_NAME = 'שאלות ממבחנים';
+        const examTitle = exam?.title || '';
+
+        const buildLocation = (rawLocation: string) => {
+            if (selectedTopics.length > 0) {
+                return `${GROUP_NAME}::${examTitle ? examTitle + ' - ' : ''}${rawLocation}`;
+            }
+            return rawLocation;
+        };
+
         let toSave: Exercise[] = [];
 
         if (!isBulkMode) {
@@ -77,7 +87,7 @@ export const ExamView: React.FC = () => {
                 topicIds: selectedTopics,
                 examId: examId,
                 goalId: id,
-                location: exLocation.trim(),
+                location: buildLocation(exLocation.trim()),
                 status: 'new',
                 consecutiveSuccesses: 0,
                 dueDate: exDueDate ? new Date(exDueDate).getTime() : undefined,
@@ -96,7 +106,7 @@ export const ExamView: React.FC = () => {
                 topicIds: selectedTopics,
                 examId: examId,
                 goalId: id,
-                location: item,
+                location: buildLocation(item),
                 status: 'new',
                 consecutiveSuccesses: 0,
                 dueDate: exDueDate ? new Date(exDueDate).getTime() : undefined,
@@ -176,16 +186,33 @@ export const ExamView: React.FC = () => {
 
     const handleSaveEdits = async () => {
         setLoading(true);
+        const GROUP_NAME = 'שאלות ממבחנים';
+        const examTitle = exam?.title || '';
         const promises = [];
         for (const ex of exercises) {
             const edit = pendingEdits[ex.id];
             if (!edit) continue;
             const originalTopics = [...(ex.topicIds || [])].sort().join(',');
             const newTopics = [...edit.topicIds].sort().join(',');
-            if (edit.location !== ex.location || originalTopics !== newTopics) {
+
+            // Update location based on topic assignment changes
+            let newLocation = edit.location;
+            const hadTopics = (ex.topicIds || []).length > 0;
+            const hasTopicsNow = edit.topicIds.length > 0;
+            const isAlreadyGrouped = edit.location.startsWith(`${GROUP_NAME}::`);
+
+            if (hasTopicsNow && !isAlreadyGrouped) {
+                // Gained topic(s): wrap in group
+                newLocation = `${GROUP_NAME}::${examTitle ? examTitle + ' - ' : ''}${edit.location}`;
+            } else if (!hasTopicsNow && hadTopics && isAlreadyGrouped) {
+                // Lost all topics: strip group prefix
+                newLocation = edit.location.replace(`${GROUP_NAME}::`, '').replace(`${examTitle} - `, '');
+            }
+
+            if (newLocation !== ex.location || originalTopics !== newTopics) {
                 promises.push(storageService.updateExerciseFull({
                     ...ex,
-                    location: edit.location,
+                    location: newLocation,
                     topicIds: edit.topicIds
                 }));
             }
@@ -243,8 +270,18 @@ export const ExamView: React.FC = () => {
                 ) : (
                     exercises.map(ex => {
                         const exTopics = topics.filter(t => ex.topicIds?.includes(t.id)).map(t => t.title).join(', ');
-                        // Format location if bulk grouped
-                        const displayLocation = ex.location.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                        // Show original question name: strip "שאלות ממבחנים::" prefix and exam title prefix
+                        const GROUP_NAME = '\u05e9\u05d0\u05dc\u05d5\u05ea \u05de\u05de\u05d1\u05d7\u05e0\u05d9\u05dd';
+                        let displayLocation: string;
+                        if (ex.location.startsWith(`${GROUP_NAME}::`)) {
+                            const afterGroup = ex.location.slice(`${GROUP_NAME}::`.length);
+                            const examPrefix = exam.title ? `${exam.title} - ` : '';
+                            displayLocation = examPrefix && afterGroup.startsWith(examPrefix)
+                                ? afterGroup.slice(examPrefix.length)
+                                : afterGroup;
+                        } else {
+                            displayLocation = ex.location.split('::').join(': ').replace(/\s+/g, ' ').trim();
+                        }
 
                         return (
                             <Card key={ex.id} className="hover:shadow-md transition-shadow">
